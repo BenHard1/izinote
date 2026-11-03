@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Correction</title>
+  <meta name="theme-color" content="#1e3a8a">
+  <meta name="description" content="Corriger les copies PDF au stylet, évaluer avec ses grilles et envoyer les corrections par e-mail.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/"><img src="icons/icon-192.png" alt=""> Correction</a>
+    <nav class="nav">
+      <a href="#/">Écoles</a>
+      <a href="#/grilles">Grilles</a>
+      <a href="#/reglages">Réglages</a>
+    </nav>
+  </header>
+  <main id="view"></main>
+  <script src="lib/pdf.min.js"></script>
+  <script src="lib/pdf-lib.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
