@@ -1,10 +1,11 @@
 // Service worker : l'appli fonctionne même sans connexion (sauf dictée et envoi des mails).
-const CACHE = 'correction-v1';
+const CACHE = 'izinote-v2';
 const ASSETS = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/util.js', 'js/editor.js', 'js/pdfexport.js', 'js/gmail.js',
   'lib/pdf.min.js', 'lib/pdf.worker.min.js', 'lib/pdf-lib.min.js',
-  'icons/icon-192.png', 'icons/icon-512.png',
+  'icons/icon-192.png', 'icons/icon-512.png', 'icons/favicon-64.png',
+  'assets/logo-simplifie.png', 'assets/logo-complet.png', 'assets/icone.png',
 ];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));

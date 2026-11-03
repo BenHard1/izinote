@@ -1,37 +1,43 @@
+/* Charte IziNote : noir, orange, beige · typographie Montserrat */
 :root {
-  --bg: #f4f6fb;
-  --surface: #ffffff;
-  --surface-2: #eef1f7;
-  --text: #172033;
-  --muted: #5f6b80;
-  --line: #dde2ec;
-  --primary: #1e3a8a;
-  --primary-2: #2f54c4;
-  --primary-soft: #e3e9fb;
-  --success: #1f8a3a;
-  --success-soft: #e2f4e6;
-  --warn: #a15c00;
-  --warn-soft: #fff1d6;
+  --brand: #ff7828;       /* orange du logo */
+  --ink: #141414;         /* noir */
+  --beige: #f5ede0;       /* beige */
+  --on-brand: #141414;
+  --bg: #f5ede0;
+  --surface: #fffaf3;
+  --surface-2: #efe4d3;
+  --text: #141414;
+  --muted: #6b5f52;
+  --line: #e3d6c3;
+  --primary: #a8490d;     /* orange foncé : texte et liens lisibles sur beige */
+  --primary-2: #ff7828;
+  --primary-soft: #ffe3cf;
+  --success: #2f7d32;
+  --success-soft: #e3f1dc;
+  --warn: #9a5a00;
+  --warn-soft: #fbecc8;
   --danger: #c0262d;
-  --danger-soft: #fde4e4;
-  --radius: 12px;
-  --shadow: 0 1px 2px rgba(20, 30, 60, 0.06), 0 4px 14px rgba(20, 30, 60, 0.06);
+  --danger-soft: #fbe1df;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(40, 25, 10, 0.06), 0 4px 14px rgba(40, 25, 10, 0.07);
   --tap: 44px;
+  --font: 'Montserrat', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #0f1420;
-    --surface: #171e2d;
-    --surface-2: #1f2839;
-    --text: #e6eaf2;
-    --muted: #97a2b8;
-    --line: #2b3549;
-    --primary: #7d9cf5;
-    --primary-2: #9bb3ff;
-    --primary-soft: #23315a;
-    --success: #5cc977;
-    --success-soft: #183a24;
+    --bg: #121110;
+    --surface: #1c1a17;
+    --surface-2: #27231f;
+    --text: #f2eadc;
+    --muted: #b0a493;
+    --line: #34302a;
+    --primary: #ff8f4a;
+    --primary-2: #ff7828;
+    --primary-soft: #3a2416;
+    --success: #6cc472;
+    --success-soft: #1b3320;
     --warn: #f0b357;
     --warn-soft: #3b2c12;
     --danger: #ff7a7f;
@@ -40,17 +46,17 @@
   }
 }
 :root[data-theme='dark'] {
-  --bg: #0f1420;
-  --surface: #171e2d;
-  --surface-2: #1f2839;
-  --text: #e6eaf2;
-  --muted: #97a2b8;
-  --line: #2b3549;
-  --primary: #7d9cf5;
-  --primary-2: #9bb3ff;
-  --primary-soft: #23315a;
-  --success: #5cc977;
-  --success-soft: #183a24;
+  --bg: #121110;
+  --surface: #1c1a17;
+  --surface-2: #27231f;
+  --text: #f2eadc;
+  --muted: #b0a493;
+  --line: #34302a;
+  --primary: #ff8f4a;
+  --primary-2: #ff7828;
+  --primary-soft: #3a2416;
+  --success: #6cc472;
+  --success-soft: #1b3320;
   --warn: #f0b357;
   --warn-soft: #3b2c12;
   --danger: #ff7a7f;
@@ -58,10 +64,11 @@
   color-scheme: dark;
 }
 
+
 * { box-sizing: border-box; }
 html, body { margin: 0; }
 body {
-  font: 16px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font: 500 16px/1.5 var(--font);
   background: var(--bg);
   color: var(--text);
   -webkit-tap-highlight-color: transparent;
@@ -83,13 +90,13 @@ code { background: var(--surface-2); padding: 1px 5px; border-radius: 5px; font-
   position: sticky; top: 0; z-index: 10;
   display: flex; align-items: center; gap: 16px;
   padding: 8px max(16px, env(safe-area-inset-left));
-  background: var(--surface); border-bottom: 1px solid var(--line);
+  background: var(--ink); border-bottom: 3px solid var(--brand);
 }
-.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; text-decoration: none; color: var(--text); font-size: 1.1rem; }
-.brand img { width: 30px; height: 30px; border-radius: 7px; }
+.brand { display: flex; align-items: center; text-decoration: none; }
+.brand img { height: 38px; width: auto; display: block; }
 .nav { display: flex; gap: 4px; margin-left: auto; }
-.nav a { padding: 8px 14px; border-radius: 999px; text-decoration: none; color: var(--muted); font-weight: 600; }
-.nav a.on { background: var(--primary-soft); color: var(--primary); }
+.nav a { padding: 8px 14px; border-radius: 999px; text-decoration: none; color: var(--beige); font-weight: 600; }
+.nav a.on { background: var(--brand); color: var(--on-brand); }
 body.fullscreen .topbar { display: none; }
 
 /* ---------- Mise en page ---------- */
@@ -114,9 +121,8 @@ section { margin: 26px 0; }
 }
 .btn:hover { border-color: var(--primary-2); }
 .btn:disabled { opacity: 0.45; pointer-events: none; }
-.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
-:root[data-theme='dark'] .btn.primary { color: #0b1020; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .btn.primary { color: #0b1020; } }
+.btn.primary { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.btn.primary:hover { background: #ff8a45; }
 .btn.success { background: var(--success-soft); border-color: var(--success); color: var(--success); }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.ghost { background: transparent; }
@@ -228,9 +234,9 @@ textarea.input { resize: vertical; line-height: 1.45; }
 .sr-status.busy { color: var(--primary); }
 .preview { margin-top: 12px; }
 .preview summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
-.preview pre { white-space: pre-wrap; background: var(--surface-2); padding: 12px; border-radius: 10px; font: 0.9rem/1.45 system-ui, sans-serif; }
+.preview pre { white-space: pre-wrap; background: var(--surface-2); padding: 12px; border-radius: 10px; font: 0.9rem/1.45 var(--font); }
 
-.toast { position: fixed; left: 50%; bottom: 24px; z-index: 200; transform: translate(-50%, 20px); opacity: 0; transition: 0.25s; background: #1d2433; color: #fff; padding: 12px 18px; border-radius: 12px; max-width: min(92vw, 520px); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3); font-weight: 500; }
+.toast { position: fixed; left: 50%; bottom: 24px; z-index: 200; transform: translate(-50%, 20px); opacity: 0; transition: 0.25s; background: var(--ink); border: 1px solid #3a3a3a; color: #fff; padding: 12px 18px; border-radius: 12px; max-width: min(92vw, 520px); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3); font-weight: 500; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .toast.success { background: #17642b; }
 .toast.error { background: #a3212a; }
@@ -264,7 +270,7 @@ textarea.input { resize: vertical; line-height: 1.45; }
 .tool-toggle input { width: 20px; height: 20px; accent-color: var(--primary); }
 
 .ed-main { flex: 1; display: flex; min-height: 0; position: relative; }
-.ed-scroll { flex: 1; overflow: auto; touch-action: none; background: #8a93a6; overscroll-behavior: contain; }
+.ed-scroll { flex: 1; overflow: auto; touch-action: none; background: #9b9184; overscroll-behavior: contain; }
 :root[data-theme='dark'] .ed-scroll { background: #0a0d14; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme='light']) .ed-scroll { background: #0a0d14; } }
 .ed-scroll[data-tool='hand'] { cursor: grab; }
@@ -306,3 +312,27 @@ textarea.input { resize: vertical; line-height: 1.45; }
   h1 { font-size: 1.35rem; }
   .li-side .progress { width: 80px; }
 }
+
+/* ---------- Identité IziNote ---------- */
+h1, h2, h3, .btn, .seg button, .tool, .lvl { font-family: var(--font); }
+h1 { font-weight: 800; letter-spacing: -0.01em; }
+h2, h3 { font-weight: 700; }
+input, textarea, select, button { font-family: var(--font); }
+.hero {
+  display: flex; align-items: center; gap: 24px; margin: 4px 0 26px; padding: 18px 26px;
+  background: var(--beige); border: 1px solid #e3d6c3; border-radius: 22px; color: var(--ink);
+}
+.hero img { width: 220px; max-width: 42%; height: auto; flex: none; }
+.hero h1 { color: var(--ink); font-size: 1.7rem; }
+.hero p { margin: 8px 0 0; color: #4a4036; font-weight: 500; }
+.hero .accent { color: #c2560f; }
+@media (max-width: 600px) { .hero { flex-direction: column; text-align: center; padding: 18px; } .hero img { max-width: 70%; } }
+.card-icon { background: var(--primary-soft); }
+.ed-top { background: var(--ink); color: var(--beige); border-bottom: 3px solid var(--brand); }
+.ed-top .icon-btn { color: var(--beige); }
+.ed-top .icon-btn:hover { background: #2a2a2a; }
+.ed-title small { color: #c9bca8; }
+.ed-top .ed-logo { height: 26px; width: auto; margin: 0 4px; }
+.mic { background: var(--brand); }
+.progress span { background: var(--brand); }
+.empty-icon img { width: 120px; height: auto; }

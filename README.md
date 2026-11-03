@@ -1,6 +1,10 @@
-# Correction de copies
+# IziNote
 
-Une web app gratuite pour corriger les copies PDF de ses étudiants sur une tablette (stylet Samsung S Pen), avec grilles d'évaluation, commentaires dictés et envoi des corrections par e-mail.
+IziNote est une web app gratuite pour corriger les copies PDF de ses étudiants sur une tablette (stylet Samsung S Pen), avec grilles d'évaluation, commentaires dictés et envoi des corrections par e-mail.
+
+![IziNote](assets/logo-complet.png)
+
+Charte graphique : noir `#141414`, orange `#FF7828`, beige `#F5EDE0` · typographie Montserrat.
 
 ## Ce que fait l'appli
 

@@ -115,9 +115,18 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
   const M = 50;
   let page = doc.addPage([W, H]);
   let y = H - M;
-  const ink = rgb(0.1, 0.1, 0.15);
-  const grey = rgb(0.45, 0.45, 0.5);
-  const accent = rgb(0.12, 0.33, 0.7);
+  const ink = rgb(0.08, 0.08, 0.08);
+  const grey = rgb(0.42, 0.37, 0.32);
+  const accent = rgb(0.76, 0.34, 0.06);
+  const orange = rgb(1, 0.47, 0.16);
+  // bandeau IziNote : filet orange + logo simplifié en haut à droite
+  page.drawRectangle({ x: 0, y: H - 8, width: W, height: 8, color: orange });
+  try {
+    const logoBytes = await (await fetch('assets/logo-simplifie.png')).arrayBuffer();
+    const logo = await doc.embedPng(logoBytes);
+    const lw = 110;
+    page.drawImage(logo, { x: W - M - lw, y: H - M - (lw * logo.height) / logo.width + 14, width: lw, height: (lw * logo.height) / logo.width });
+  } catch {}
 
   const ensure = h => {
     if (y - h < M) {
@@ -146,7 +155,7 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
     const colW = W - 2 * M;
     const valW = 170;
     ensure(24);
-    page.drawRectangle({ x: M, y: y - 22, width: colW, height: 22, color: rgb(0.93, 0.95, 0.99) });
+    page.drawRectangle({ x: M, y: y - 22, width: colW, height: 22, color: rgb(0.96, 0.93, 0.88) });
     page.drawText(grid.mode === 'note' ? 'Critère' : 'Compétence', { x: M + 8, y: y - 15, size: 10, font: bold, color: ink });
     page.drawText(grid.mode === 'note' ? 'Points' : 'Niveau', { x: M + colW - valW + 8, y: y - 15, size: 10, font: bold, color: ink });
     y -= 22;
@@ -158,7 +167,7 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
       lab.forEach((t, k) => page.drawText(t, { x: M + 8, y: y - 16 - k * 14, size: 10.5, font, color: ink }));
       val.forEach((t, k) => page.drawText(t, { x: M + colW - valW + 8, y: y - 16 - k * 14, size: 10.5, font: bold, color: ink }));
       y -= h;
-      page.drawLine({ start: { x: M, y }, end: { x: M + colW, y }, thickness: 0.5, color: rgb(0.8, 0.82, 0.86) });
+      page.drawLine({ start: { x: M, y }, end: { x: M + colW, y }, thickness: 0.5, color: rgb(0.89, 0.84, 0.76) });
     }
     y -= 12;
     text(r.totalLine, { f: bold, size: 14, color: accent });

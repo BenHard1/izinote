@@ -1,13 +1,13 @@
 {
-  "name": "Correction de copies",
-  "short_name": "Correction",
+  "name": "IziNote",
+  "short_name": "IziNote",
   "description": "Corriger les copies PDF au stylet et envoyer les corrections.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#f4f6fb",
-  "theme_color": "#1e3a8a",
+  "background_color": "#f5ede0",
+  "theme_color": "#141414",
   "lang": "fr",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },

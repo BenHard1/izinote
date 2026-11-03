@@ -93,7 +93,12 @@ async function home() {
   const schools = (await db.all('schools')).sort(db.sortByName);
   const classes = await db.all('classes');
   view.innerHTML = `<div class="page-wrap">
-    <div class="page-head"><h1>Mes écoles</h1><button class="btn primary" id="add">+ École</button></div>
+    <div class="hero">
+      <img src="assets/logo-complet.png" alt="IziNote">
+      <div><h1>Corriger, <span class="accent">tranquillement.</span></h1>
+      <p>Annotez les copies au stylet, évaluez avec vos grilles, dictez vos commentaires, puis envoyez tout aux étudiants en un geste.</p></div>
+    </div>
+    <div class="page-head"><h2>Mes écoles</h2><button class="btn primary" id="add">+ École</button></div>
     ${
       schools.length
         ? `<div class="cards">${schools
@@ -934,7 +939,7 @@ async function settingsView() {
     if (!st.googleClientId) return toast('Collez d’abord l’ID client Google.', 'error');
     if (!/^\S+@\S+\.\S+$/.test(to)) return toast('Indiquez une adresse e-mail pour le test.', 'error');
     try {
-      await gmail.sendMail(st.googleClientId, { to, subject: 'Test – Appli de correction', body: 'Ça marche ! Les corrections pourront être envoyées depuis ce compte.' });
+      await gmail.sendMail(st.googleClientId, { to, subject: 'Test – IziNote', body: 'Ça marche ! Les corrections pourront être envoyées depuis ce compte.' });
       toast('Mail de test envoyé ✓', 'success');
     } catch (e) {
       toast(e.message, 'error');
