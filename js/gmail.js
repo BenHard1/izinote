@@ -101,10 +101,13 @@ export function buildMime({ to, subject, body, attachment }) {
 
 export async function sendMail(clientId, msg) {
   const tk = await authorize(clientId);
-  const res = await fetch('https://gmail.googleapis.com/upload/gmail/v1/users/me/messages/send?uploadType=media', {
+  // Adresse « simple » de l'API (message encodé en base64url dans du JSON) : contrairement à
+  // l'adresse /upload, elle renvoie les en-têtes CORS, sinon le navigateur croit à une erreur réseau.
+  const raw = bytesToB64(new TextEncoder().encode(buildMime(msg))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
-    headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'message/rfc822' },
-    body: buildMime(msg),
+    headers: { Authorization: 'Bearer ' + tk, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ raw }),
   });
   if (res.status === 401) {
     token = null;
