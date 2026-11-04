@@ -389,3 +389,12 @@ section.subject { margin: 18px 0; }
 .busy { background: var(--beige); border-radius: 18px; padding: 18px 26px 16px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,.25); max-width: 80vw; }
 .busy img { width: 130px; height: auto; display: block; margin: 0 auto 6px; }
 .busy p { margin: 0; font-weight: 600; color: var(--ink); }
+
+/* ---------- Envois programmés ---------- */
+.tag.sched { background: var(--beige); color: var(--ink); margin-left: 6px; }
+.tag.err { background: var(--warn-soft); color: var(--warn); margin-left: 6px; }
+.sched-box { margin: 14px 0 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--beige); }
+.sched-box .input { margin-top: 10px; max-width: 280px; }
+.linkbtn { background: none; border: none; padding: 0; color: var(--primary); text-decoration: underline; font: inherit; cursor: pointer; }
+.sched-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 800; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.3); font-weight: 600; max-width: calc(100vw - 32px); }
+.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.8rem; }

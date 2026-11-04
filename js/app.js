@@ -8,6 +8,8 @@ import {
 import { mountEditor } from './editor.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
 import * as gmail from './gmail.js';
+import * as sched from './schedule.js';
+import { relayScript } from './relayscript.js';
 import { classData, average, semesterOf, exportClassXlsx, studentRecapPdf } from './reports.js';
 import { readGridFile } from './gridimport.js';
 import { ACCEPT_DOCS, checkSupported, filesToPdfBlob } from './convert.js';
@@ -604,7 +606,7 @@ function statusLabel(c, a) {
   const noCopy = a && (a.kind === 'oral' || a.kind === 'groupe');
   if (!c || (!c.pdf && c.status !== 'done')) return noCopy ? '<span class="tag todo">À évaluer</span>' : '<span class="tag">Pas de copie</span>';
   if (c.sentAt) return `<span class="tag sent">Envoyée le ${fmtDate(c.sentAt)}</span>`;
-  if (c.status === 'done') return `<span class="tag done">${noCopy ? 'Évalué' : 'Corrigée'}</span>`;
+  if (c.status === 'done') return `<span class="tag done">${noCopy ? 'Évalué' : 'Corrigée'}</span>${sched.scheduleTag(c)}`;
   return '<span class="tag todo">À corriger</span>';
 }
 
@@ -931,34 +933,44 @@ async function sendDialog(a, cls, students, copies) {
     return;
   }
   gmail.loadGis().catch(e => toast(e.message, 'error'));
+  const relay = sched.hasRelay(settings);
   const rows = students.map(s => ({ s, c: copies.find(c => c.studentId === s.id) }));
   const notDone = rows.filter(r => !r.c || r.c.status !== 'done');
+  const pad = n => String(n).padStart(2, '0');
+  const toLocalInput = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(18, 0, 0, 0);
+  const statusOf = (s, c) => {
+    if (!s.email) return 'pas d’e-mail';
+    if (!c || c.status !== 'done') return 'non corrigée';
+    if (c.sentAt) return `déjà envoyée le ${fmtDate(c.sentAt)}`;
+    if (c.scheduledAt) return c.scheduleError ? `programmation en échec : ${c.scheduleError}` : `⏰ programmée : ${sched.fmtDateTime(c.scheduledAt)}`;
+    return '';
+  };
   const body = `
     ${notDone.length ? `<div class="banner warn">${notDone.length} copie${notDone.length > 1 ? 's ne sont' : ' n’est'} pas encore corrigée${notDone.length > 1 ? 's' : ''} : ${notDone.map(r => esc(studentName(r.s))).join(', ')}.</div>` : `<div class="banner success">Toute la classe est corrigée.</div>`}
     <p class="muted">Chaque étudiant coché recevra un e-mail avec sa copie corrigée en PDF (annotations + fiche d’évaluation) et votre commentaire.</p>
     <div class="send-list">${rows
       .map(({ s, c }) => {
         const can = c && c.status === 'done' && s.email;
-        const why = !s.email ? 'pas d’e-mail' : !c || c.status !== 'done' ? 'non corrigée' : c.sentAt ? `déjà envoyée le ${fmtDate(c.sentAt)}` : '';
-        return `<label class="send-row ${can ? '' : 'disabled'}"><input type="checkbox" data-s="${s.id}" ${can && !c.sentAt ? 'checked' : ''} ${can ? '' : 'disabled'}>
-          <span class="sr-name">${esc(studentName(s))}<small>${esc(s.email || '')}</small></span><span class="sr-status" data-st="${s.id}">${esc(why)}</span></label>`;
+        const planned = can && !c.sentAt && c.scheduledAt;
+        return `<label class="send-row ${can ? '' : 'disabled'}"><input type="checkbox" data-s="${s.id}" ${can && !c.sentAt && !c.scheduledAt ? 'checked' : ''} ${can ? '' : 'disabled'}>
+          <span class="sr-name">${esc(studentName(s))}<small>${esc(s.email || '')}</small></span><span class="sr-status" data-st="${s.id}">${esc(statusOf(s, c))}${planned ? ` <button type="button" class="linkbtn" data-unsched="${s.id}">annuler</button>` : ''}</span></label>`;
       })
       .join('')}</div>
+    <div class="sched-box">
+      <label class="check"><input type="checkbox" id="schedOn"> ⏰ Programmer l’envoi pour plus tard</label>
+      <div id="schedFields" hidden>
+        <input class="input" type="datetime-local" id="schedAt" value="${toLocalInput(tomorrow)}">
+        <p class="muted small">${
+          relay
+            ? 'Les mails partiront de votre Gmail à l’heure prévue (à 5 minutes près), même si la tablette est éteinte. Les PDF sont préparés maintenant : si vous modifiez une copie ensuite, reprogrammez-la.'
+            : 'Les mails partiront à l’heure prévue si IziNote est ouvert sur la tablette ; sinon, à la prochaine ouverture (Google peut demander un clic de confirmation). Pour un envoi même tablette éteinte, activez le « relais d’envoi programmé » dans les Réglages.'
+        }</p>
+      </div>
+    </div>
     <details class="preview"><summary>Aperçu du message</summary><pre id="prev"></pre></details>`;
-
-  const vars = (s, c) => {
-    const r = computeResult(a.grid, c?.evaluation || {});
-    return {
-      prenom: s.firstName || '',
-      nom: s.lastName || '',
-      devoir: a.title,
-      classe: cls.name,
-      note: r.short || '',
-      evaluation: resultText(a.grid, c?.evaluation || {}),
-      commentaire: (c?.comment || '').trim() || '—',
-      professeur: settings.teacherName || '',
-    };
-  };
 
   await modal({
     title: `Envoyer les corrections – ${a.title}`,
@@ -968,49 +980,82 @@ async function sendDialog(a, cls, students, copies) {
     onOpen: (w, close) => {
       const first = rows.find(r => r.c && r.c.status === 'done') || rows[0];
       if (first) {
-        const v = vars(first.s, first.c);
+        const v = sched.mailVars(a, cls, first.s, first.c, settings);
         $('#prev', w).textContent = `À : ${first.s.email || '?'}\nObjet : ${gmail.fillTemplate(settings.mailSubject, v)}\n\n${gmail.fillTemplate(settings.mailBody, v)}\n\n📎 ${correctedFileName(first.s, a)}`;
       }
       const sendBtn = $('.modal-actions .primary', w);
+      const schedOn = $('#schedOn', w);
+      schedOn.onchange = () => {
+        $('#schedFields', w).hidden = !schedOn.checked;
+        sendBtn.textContent = schedOn.checked ? 'Programmer' : 'Envoyer';
+      };
+      const setStatus = (sid, text, cls = '') => {
+        const st = $(`[data-st="${sid}"]`, w);
+        st.textContent = text;
+        st.className = 'sr-status ' + cls;
+      };
+      w.addEventListener('click', async e => {
+        const b = e.target.closest('[data-unsched]');
+        if (!b) return;
+        e.preventDefault();
+        const sid = b.dataset.unsched;
+        const { c } = rows.find(r => r.s.id === sid);
+        try {
+          if (c.scheduledVia === 'relay') await sched.relayCancel(await db.getSettings(), [c.id]);
+          sched.clearSchedule(c);
+          await db.put('copies', c);
+          setStatus(sid, 'programmation annulée');
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
       sendBtn.onclick = async () => {
         const ids = $$('input[data-s]:checked', w).map(i => i.dataset.s);
         if (!ids.length) return toast('Aucun étudiant sélectionné.', 'error');
+        const later = schedOn.checked;
+        let when = 0;
+        if (later) {
+          when = new Date($('#schedAt', w).value).getTime();
+          if (!when || isNaN(when)) return toast('Choisissez une date et une heure.', 'error');
+          if (when < Date.now() + 60000) return toast('Choisissez un moment dans le futur.', 'error');
+        }
         sendBtn.disabled = true;
-        try {
-          await gmail.authorize(settings.googleClientId); // dans le clic : la fenêtre Google peut s'ouvrir
-        } catch (e) {
-          sendBtn.disabled = false;
-          return toast(e.message, 'error');
+        if (!later) {
+          try {
+            await gmail.authorize(settings.googleClientId); // dans le clic : la fenêtre Google peut s'ouvrir
+          } catch (e) {
+            sendBtn.disabled = false;
+            return toast(e.message, 'error');
+          }
         }
         let ok = 0;
         for (const sid of ids) {
           const { s, c } = rows.find(r => r.s.id === sid);
-          const st = $(`[data-st="${sid}"]`, w);
-          st.textContent = 'envoi…';
-          st.className = 'sr-status busy';
+          setStatus(sid, later ? 'programmation…' : 'envoi…', 'busy');
           try {
-            const bytes = await buildCorrectedPdf({ copy: c, student: s, assignment: a, cls, settings });
-            const v = vars(s, c);
-            await gmail.sendMail(settings.googleClientId, {
-              to: s.email,
-              subject: gmail.fillTemplate(settings.mailSubject, v),
-              body: gmail.fillTemplate(settings.mailBody, v),
-              attachment: { name: correctedFileName(s, a), bytes },
-            });
-            c.sentAt = Date.now();
-            await db.put('copies', c);
-            st.textContent = '✓ envoyée';
-            st.className = 'sr-status ok';
+            if (!later) {
+              await sched.sendNow(a, cls, s, c, settings);
+              setStatus(sid, '✓ envoyée', 'ok');
+            } else {
+              if (relay) await sched.relaySchedule(settings, c, await sched.prepareMail(a, cls, s, c, settings), when);
+              else if (c.scheduledVia === 'relay') await sched.relayCancel(settings, [c.id]).catch(() => {});
+              sched.clearSchedule(c);
+              c.scheduledAt = when;
+              c.scheduledVia = relay ? 'relay' : 'local';
+              await db.put('copies', c);
+              setStatus(sid, `⏰ programmée : ${sched.fmtDateTime(when)}`, 'ok');
+            }
             $(`input[data-s="${sid}"]`, w).checked = false;
             ok++;
           } catch (e) {
             console.error(e);
-            st.textContent = '✗ ' + e.message;
-            st.className = 'sr-status err';
+            setStatus(sid, '✗ ' + e.message, 'err');
           }
         }
         sendBtn.disabled = false;
-        toast(`${ok}/${ids.length} mail${ids.length > 1 ? 's' : ''} envoyé${ok > 1 ? 's' : ''}`, ok === ids.length ? 'success' : 'error');
+        const n = ids.length;
+        if (later) toast(`${ok}/${n} envoi${n > 1 ? 's' : ''} programmé${ok > 1 ? 's' : ''} pour ${sched.fmtDateTime(when)}`, ok === n ? 'success' : 'error');
+        else toast(`${ok}/${n} mail${n > 1 ? 's' : ''} envoyé${ok > 1 ? 's' : ''}`, ok === n ? 'success' : 'error');
       };
     },
   });
@@ -1371,6 +1416,21 @@ async function settingsView() {
     </section>
 
     <section class="card-sec">
+      <h2>Relais d’envoi programmé <span class="muted small">(facultatif)</span></h2>
+      <p>Pour que les envois programmés partent <b>même si la tablette est éteinte</b>, installez une fois ce petit relais gratuit dans votre Gmail dédié. Sans relais, la programmation marche aussi, mais IziNote doit être ouvert à l’heure prévue (sinon l’envoi se fait à la prochaine ouverture).</p>
+      <ol class="steps">
+        <li>Sur un ordinateur, connecté avec le Gmail dédié, ouvrez <a href="https://script.google.com/home/projects/create" target="_blank" rel="noopener">script.google.com</a> (nouveau projet). Nommez-le « IziNote relais ».</li>
+        <li>Effacez le code présent et collez celui-ci : <button class="btn small" id="copyRelay">📋 Copier le code du relais</button></li>
+        <li>Enregistrez (💾), choisissez la fonction <b>installer</b> en haut, puis <b>▶ Exécuter</b>. Google demande des autorisations : « Examiner les autorisations », votre compte, « Paramètres avancés », « Accéder à IziNote relais », puis « Autoriser ».</li>
+        <li>Bouton <b>Déployer › Nouveau déploiement</b>, type ⚙ <b>Application Web</b>. « Exécuter en tant que » : <b>Moi</b> ; « Qui a accès » : <b>Tout le monde</b>. Déployez et copiez l’<b>URL de l’application Web</b> (elle finit par <code>/exec</code>).</li>
+        <li>Collez l’URL ci-dessous, enregistrez, puis testez.</li>
+      </ol>
+      <label class="field"><span>URL du relais</span><input class="input" id="relayUrl" value="${esc(s.relayUrl || '')}" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" spellcheck="false"></label>
+      <div class="row wrap"><button class="btn" id="relayTest">Tester le relais</button></div>
+      <p class="muted small">Le relais garde les mails programmés dans votre Google Drive (dossier « IziNote – envois programmés ») et vérifie toutes les 5 minutes s’il y a des mails à envoyer. Un compte Gmail gratuit peut envoyer environ 100 mails par jour avec ce relais.</p>
+    </section>
+
+    <section class="card-sec">
       <h2>Modèle de mail</h2>
       <label class="field"><span>Objet</span><input class="input" id="mailSubject" value="${esc(s.mailSubject)}"></label>
       <label class="field"><span>Message</span><textarea class="input" id="mailBody" rows="9">${esc(s.mailBody)}</textarea></label>
@@ -1394,7 +1454,36 @@ async function settingsView() {
     googleClientId: $('#googleClientId').value.trim(),
     mailSubject: $('#mailSubject').value,
     mailBody: $('#mailBody').value,
+    relayUrl: $('#relayUrl').value.trim(),
+    relaySecret: s.relaySecret,
   });
+  if (!s.relaySecret) {
+    s.relaySecret = Array.from(crypto.getRandomValues(new Uint8Array(18)), b => b.toString(16).padStart(2, '0')).join('');
+    await db.saveSettings({ ...s });
+  }
+  $('#copyRelay').onclick = async () => {
+    const code = relayScript(s.relaySecret);
+    try {
+      await navigator.clipboard.writeText(code);
+      toast('Code du relais copié ✓ Collez-le dans script.google.com', 'success');
+    } catch {
+      await modal({ title: 'Code du relais', wide: true, body: `<p class="muted small">Sélectionnez tout le texte et copiez-le.</p><textarea class="input mono" rows="16" readonly>${esc(code)}</textarea>` });
+    }
+  };
+  $('#relayTest').onclick = async () => {
+    const st = collect();
+    await db.saveSettings(st);
+    if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(st.relayUrl)) return toast('Collez l’URL de l’application Web (elle commence par https://script.google.com et finit par /exec).', 'error');
+    const b = busy('Test du relais…');
+    try {
+      const r = await sched.relayTest(st);
+      toast(`Relais opérationnel ✓ (encore ${r.quota} mails possibles aujourd’hui)`, 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    } finally {
+      b.done();
+    }
+  };
   $('#save').onclick = async () => {
     await db.saveSettings(collect());
     toast('Réglages enregistrés', 'success');
@@ -1436,3 +1525,5 @@ async function settingsView() {
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
 if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
 router();
+sched.onScheduleChange(() => /^#\/(devoir|classe)\//.test(location.hash) && router());
+sched.startScheduler();
