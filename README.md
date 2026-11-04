@@ -9,8 +9,8 @@ Charte graphique : noir `#141414`, orange `#FF7828`, beige `#F5EDE0` · typograp
 ## Ce que fait l'appli
 
 - **Rangement** : École › Classe › Devoir / projet › Étudiant. Tout s'ajoute à la main (bouton « + »). Les étudiants peuvent aussi être collés depuis un tableur.
-- **Copies** : import des PDF un par un (📎) ou en lot. L'appli devine l'étudiant d'après le nom du fichier, et vous vérifiez avant de valider.
-- **Correction au stylet** : stylo (4 couleurs, 3 épaisseurs), surligneur, texte, gomme, annuler/rétablir, zoom. Avec « Stylet seul », le doigt sert à défiler et à zoomer (pincer) sans laisser de trace.
+- **Copies** : import un par un (📎) ou en lot. Fichiers acceptés : PDF, Word (.docx) et photos ; les fichiers Word et les photos sont convertis en PDF dans la tablette. L'appli devine l'étudiant d'après le nom du fichier, et vous vérifiez avant de valider. Plusieurs documents pour un même élève sont assemblés à la suite, et « 📎 Ajouter un document » dans l'écran de correction en ajoute d'autres sans perdre les annotations.
+- **Correction au stylet** : stylo (4 couleurs + vos couleurs avec « ＋ », 4 épaisseurs qui restent les mêmes à l'écran quand on zoome), tampons 🏷️ (✓, ✗, ★, « Très bien », « À revoir »… et vos propres tampons), surligneur, texte, gomme, annuler/rétablir, zoom. Avec « Stylet seul », le doigt sert à défiler et à zoomer (pincer) sans laisser de trace.
 - **Commentaire oral** : bouton 🎙 pour dicter, retranscrit en texte (dictée gratuite de Chrome, il faut internet). Dites « virgule », « point » ou « à la ligne » pour la ponctuation.
 - **Grilles d'évaluation** propres à chaque devoir :
   - *Notation* : critères avec un nombre de points, note ramenée sur 20 (ou autre) si vous le souhaitez ;

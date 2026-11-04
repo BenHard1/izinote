@@ -1,13 +1,16 @@
 // Écran de correction : affichage du PDF, annotation au stylet, grille, commentaire (écrit ou dicté).
 import { esc, $, $$, modal, toast, attachDictation, speechSupported, computeResult, fmtNum, parseNum, studentName, download } from './util.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
+import { BUILTIN_STAMPS, STAMP_SIZES, drawStampCanvas, stampBoxCss } from './stamps.js';
 
 const COLORS = ['#d62828', '#1f8a3a', '#1d4ed8', '#111111'];
 const HL_COLORS = ['#ffd60a', '#7ee081', '#7cc6fe', '#ff9ecd'];
+// Épaisseurs en pixels à l'écran : un trait fin reste fin même quand on zoome pour écrire.
 const WIDTHS = [
-  { w: 0.0022, label: 'Fin' },
-  { w: 0.0038, label: 'Moyen' },
-  { w: 0.0065, label: 'Épais' },
+  { px: 1.1, d: 3, label: 'Très fin' },
+  { px: 2, d: 5, label: 'Fin' },
+  { px: 3.5, d: 8, label: 'Moyen' },
+  { px: 6, d: 12, label: 'Épais' },
 ];
 const TEXT_SIZES = [
   { s: 0.018, label: 'Petit' },
@@ -37,7 +40,9 @@ export async function mountEditor(root, ctx) {
     tool: prefs.tool || 'pen',
     color: prefs.color || COLORS[0],
     hlColor: prefs.hlColor || HL_COLORS[0],
-    width: prefs.width ?? 1,
+    width: Math.min(WIDTHS.length - 1, prefs.width2 ?? 1),
+    stamp: prefs.stamp || BUILTIN_STAMPS[0],
+    stampSize: prefs.stampSize ?? 1,
     textSize: prefs.textSize ?? 1,
     zoom: 1,
     stylusOnly: prefs.stylusOnly ?? settings.stylusOnly,
@@ -68,11 +73,13 @@ export async function mountEditor(root, ctx) {
         <button class="tool" data-tool="pen" title="Stylo">✒️</button>
         <button class="tool" data-tool="hl" title="Surligneur">🖍️</button>
         <button class="tool" data-tool="text" title="Texte (clavier ou dictée)">T</button>
+        <button class="tool" data-tool="stamp" title="Tampons">🏷️</button>
         <button class="tool" data-tool="eraser" title="Gomme">⌫</button>
         <button class="tool" data-tool="hand" title="Déplacer">✋</button>
       </div>
       <div class="tool-group colors"></div>
       <div class="tool-group widths"></div>
+      <div class="tool-group stamps"></div>
       <div class="tool-group">
         <button class="tool" data-act="undo" title="Annuler">↶</button>
         <button class="tool" data-act="redo" title="Rétablir">↷</button>
@@ -98,76 +105,190 @@ export async function mountEditor(root, ctx) {
   const panel = $('.ed-panel', root);
 
   // ---------- Barre d'outils ----------
+  // Les écouteurs posés sur `root` (partagé entre les copies) sont retirés quand on change de copie.
+  const life = new AbortController();
+  const customColors = () => (settings.customColors = settings.customColors || []);
+  const customStamps = () => (settings.customStamps = settings.customStamps || []);
+  const sameStamp = (a, b) => a && b && a.k === b.k && (a.k !== 'text' || a.text === b.text);
+
   function renderToolbar() {
     $$('.tool[data-tool]', root).forEach(b => b.classList.toggle('on', b.dataset.tool === st.tool));
-    const colorList = st.tool === 'hl' ? HL_COLORS : COLORS;
+    const colorList = [...(st.tool === 'hl' ? HL_COLORS : COLORS), ...customColors()];
     const cur = st.tool === 'hl' ? st.hlColor : st.color;
-    $('.colors', root).innerHTML = colorList
-      .map(c => `<button class="swatch ${c === cur ? 'on' : ''}" data-color="${c}" style="--c:${c}" title="Couleur"></button>`)
+    $('.colors', root).innerHTML =
+      colorList.map(c => `<button class="swatch ${c === cur ? 'on' : ''}" data-color="${c}" style="--c:${c}" title="Couleur"></button>`).join('') +
+      `<button class="swatch add" data-act="colors" title="Couleurs personnalisées">＋</button>`;
+    const isText = st.tool === 'text',
+      isStamp = st.tool === 'stamp';
+    const sizes = isText ? TEXT_SIZES : isStamp ? STAMP_SIZES : WIDTHS;
+    const curSize = isText ? st.textSize : isStamp ? st.stampSize : st.width;
+    $('.widths', root).innerHTML = sizes
+      .map((w, i) => `<button class="tool wbtn ${i === curSize ? 'on' : ''}" data-w="${i}" title="${w.label}"><span style="--d:${w.d || 4 + i * 4}px"></span></button>`)
       .join('');
-    const isText = st.tool === 'text';
-    $('.widths', root).innerHTML = (isText ? TEXT_SIZES : WIDTHS)
-      .map((w, i) => `<button class="tool wbtn ${i === (isText ? st.textSize : st.width) ? 'on' : ''}" data-w="${i}" title="${w.label}"><span style="--d:${4 + i * 4}px"></span></button>`)
-      .join('');
+    const stamps = [...BUILTIN_STAMPS, ...customStamps().map(text => ({ k: 'text', text }))];
+    $('.stamps', root).innerHTML = isStamp
+      ? stamps
+          .map(
+            (sp, i) =>
+              `<button class="stamp-btn ${sameStamp(sp, st.stamp) ? 'on' : ''}" data-stamp="${i}" style="--c:${st.color}" title="Tampon">${
+                sp.k === 'check' ? '✓' : sp.k === 'cross' ? '✗' : sp.k === 'star' ? '★' : esc(sp.text)
+              }</button>`
+          )
+          .join('') + `<button class="stamp-btn add" data-act="stamps" title="Créer ou supprimer des tampons">＋ Tampon</button>`
+      : '';
+    $('.stamps', root).style.display = isStamp ? '' : 'none';
     $('.colors', root).style.display = st.tool === 'eraser' || st.tool === 'hand' ? 'none' : '';
     $('.widths', root).style.display = st.tool === 'eraser' || st.tool === 'hand' ? 'none' : '';
     $('.zoomlabel', root).textContent = Math.round(st.zoom * 100) + '%';
     $('[data-act=undo]', root).disabled = !undo.length;
     $('[data-act=redo]', root).disabled = !redo.length;
     scroll.dataset.tool = st.tool;
+    renderToolbar.stamps = stamps;
   }
 
-  root.addEventListener('click', e => {
-    const t = e.target.closest('button, input');
-    if (!t || !root.contains(t)) return;
-    if (t.dataset.tool) {
-      st.tool = t.dataset.tool;
-      if (st.tool !== 'hand') prefs.tool = st.tool;
-    } else if (t.dataset.color) {
-      if (st.tool === 'hl') st.hlColor = prefs.hlColor = t.dataset.color;
+  async function manageColors() {
+    let picked = null;
+    const r = await modal({
+      title: 'Couleurs personnalisées',
+      body: `<p class="muted small">Choisissez une couleur puis « Ajouter ». Elle reste disponible pour toutes les copies (8 au maximum).</p>
+        <div class="row"><input type="color" id="cpick" value="${st.tool === 'hl' ? st.hlColor : st.color}" class="color-input"><span class="muted">Touchez le carré pour choisir</span></div>
+        <div class="custom-list">${customColors()
+          .map((c, i) => `<span class="custom-item"><span class="swatch" style="--c:${c}"></span><button class="icon-btn" data-delc="${i}" title="Retirer">✕</button></span>`)
+          .join('') || '<p class="muted small">Aucune couleur personnalisée pour l’instant.</p>'}</div>`,
+      actions: [
+        { label: 'Fermer', value: null },
+        { label: 'Ajouter cette couleur', value: 'add', cls: 'primary' },
+      ],
+      onOpen: (w, close) =>
+        $$('[data-delc]', w).forEach(
+          b =>
+            (b.onclick = async () => {
+              customColors().splice(+b.dataset.delc, 1);
+              await ctx.saveSettings(settings);
+              close('deleted');
+            })
+        ),
+      validate: (v, w) => {
+        picked = $('#cpick', w).value;
+        return true;
+      },
+    });
+    if (r === 'add' && picked) {
+      const list = customColors().filter(c => c !== picked);
+      list.push(picked);
+      settings.customColors = list.slice(-8);
+      if (st.tool === 'hl') st.hlColor = prefs.hlColor = picked;
       else {
-        st.color = prefs.color = t.dataset.color;
-        if (st.tool !== 'text') st.tool = prefs.tool = 'pen';
+        st.color = prefs.color = picked;
+        if (st.tool !== 'text' && st.tool !== 'stamp') st.tool = prefs.tool = 'pen';
       }
-    } else if (t.dataset.w != null) {
-      if (st.tool === 'text') st.textSize = prefs.textSize = +t.dataset.w;
-      else st.width = prefs.width = +t.dataset.w;
-    } else {
-      switch (t.dataset.act) {
-        case 'back':
-          return ctx.exit();
-        case 'prev':
-          return prevId && ctx.goto(prevId);
-        case 'next':
-          return nextId && ctx.goto(nextId);
-        case 'panel':
-          st.panelOpen = prefs.panelOpen = !st.panelOpen;
-          ed.classList.toggle('panel-open', st.panelOpen);
-          savePrefs();
-          setTimeout(relayout, 260);
-          return;
-        case 'undo':
-          return doUndo();
-        case 'redo':
-          return doRedo();
-        case 'zoomin':
-          return setZoom(st.zoom * 1.25);
-        case 'zoomout':
-          return setZoom(st.zoom / 1.25);
-        case 'zoomfit':
-          return setZoom(1);
-        case 'stylus':
-          st.stylusOnly = prefs.stylusOnly = t.checked;
-          savePrefs();
-          toast(st.stylusOnly ? 'Seul le stylet écrit. Le doigt fait défiler.' : 'Le doigt écrit aussi (2 doigts pour défiler).');
-          return;
-        default:
-          return;
-      }
+      await ctx.saveSettings(settings);
+      savePrefs();
     }
-    savePrefs();
     renderToolbar();
-  });
+    if (r === 'deleted') manageColors();
+  }
+
+  async function manageStamps() {
+    let text = '';
+    const r = await modal({
+      title: 'Mes tampons',
+      body: `<p class="muted small">Créez des tampons pour les remarques que vous écrivez souvent (ex. « Bonne démarche », « Cf. cours », « Hors sujet »).</p>
+        <div class="row"><input class="input" id="stext" maxlength="40" placeholder="Texte du tampon"><span></span></div>
+        <div class="custom-list">${customStamps()
+          .map((t, i) => `<span class="custom-item stamp-chip">${esc(t)}<button class="icon-btn" data-dels="${i}" title="Supprimer">✕</button></span>`)
+          .join('') || '<p class="muted small">Aucun tampon personnel pour l’instant.</p>'}</div>`,
+      actions: [
+        { label: 'Fermer', value: null },
+        { label: 'Créer le tampon', value: 'add', cls: 'primary' },
+      ],
+      onOpen: (w, close) =>
+        $$('[data-dels]', w).forEach(
+          b =>
+            (b.onclick = async () => {
+              customStamps().splice(+b.dataset.dels, 1);
+              await ctx.saveSettings(settings);
+              close('deleted');
+            })
+        ),
+      validate: (v, w) => {
+        text = $('#stext', w).value.trim();
+        if (!text) toast('Écrivez le texte du tampon.', 'error');
+        return !!text;
+      },
+    });
+    if (r === 'add') {
+      if (!customStamps().includes(text)) customStamps().push(text);
+      st.stamp = prefs.stamp = { k: 'text', text };
+      await ctx.saveSettings(settings);
+      savePrefs();
+    }
+    renderToolbar();
+    if (r === 'deleted') manageStamps();
+  }
+
+  root.addEventListener(
+    'click',
+    e => {
+      const t = e.target.closest('button, input');
+      if (!t || !root.contains(t) || t.closest('.ed-panel')) return;
+      if (t.dataset.tool) {
+        st.tool = t.dataset.tool;
+        if (st.tool !== 'hand') prefs.tool = st.tool;
+      } else if (t.dataset.color) {
+        if (st.tool === 'hl') st.hlColor = prefs.hlColor = t.dataset.color;
+        else {
+          st.color = prefs.color = t.dataset.color;
+          if (st.tool !== 'text' && st.tool !== 'stamp') st.tool = prefs.tool = 'pen';
+        }
+      } else if (t.dataset.w != null) {
+        if (st.tool === 'text') st.textSize = prefs.textSize = +t.dataset.w;
+        else if (st.tool === 'stamp') st.stampSize = prefs.stampSize = +t.dataset.w;
+        else st.width = prefs.width2 = +t.dataset.w;
+      } else if (t.dataset.stamp != null) {
+        st.stamp = prefs.stamp = renderToolbar.stamps[+t.dataset.stamp];
+      } else {
+        switch (t.dataset.act) {
+          case 'back':
+            return ctx.exit();
+          case 'prev':
+            return prevId && ctx.goto(prevId);
+          case 'next':
+            return nextId && ctx.goto(nextId);
+          case 'panel':
+            st.panelOpen = prefs.panelOpen = !st.panelOpen;
+            ed.classList.toggle('panel-open', st.panelOpen);
+            savePrefs();
+            setTimeout(relayout, 260);
+            return;
+          case 'undo':
+            return doUndo();
+          case 'redo':
+            return doRedo();
+          case 'zoomin':
+            return setZoom(st.zoom * 1.25);
+          case 'zoomout':
+            return setZoom(st.zoom / 1.25);
+          case 'zoomfit':
+            return setZoom(1);
+          case 'colors':
+            return manageColors();
+          case 'stamps':
+            return manageStamps();
+          case 'stylus':
+            st.stylusOnly = prefs.stylusOnly = t.checked;
+            savePrefs();
+            toast(st.stylusOnly ? 'Seul le stylet écrit. Le doigt fait défiler.' : 'Le doigt écrit aussi (2 doigts pour défiler).');
+            return;
+          default:
+            return;
+        }
+      }
+      savePrefs();
+      renderToolbar();
+    },
+    { signal: life.signal }
+  );
 
   // ---------- Historique (annuler / rétablir) ----------
   const snapshot = () => JSON.stringify(copy.annotations);
@@ -324,6 +445,8 @@ export async function mountEditor(root, ctx) {
       if (pts.length > 1) g.lineTo(pts[pts.length - 1][0] * W, pts[pts.length - 1][1] * H);
       g.stroke();
       g.restore();
+    } else if (it.t === 'stamp') {
+      drawStampCanvas(g, it, W, H);
     } else if (it.t === 'text') {
       const size = it.s * W;
       g.save();
@@ -425,8 +548,8 @@ export async function mountEditor(root, ctx) {
     capture(e.pointerId);
     const [x, y] = norm(e, hit.r);
     if (st.tool === 'pen' || st.tool === 'hl') {
-      const w = WIDTHS[st.width].w;
-      const item = st.tool === 'pen' ? { t: 'ink', c: st.color, w, o: 1, p: [[x, y]] } : { t: 'ink', c: st.hlColor, w: w * 4.5, o: 0.45, hl: true, p: [[x, y]] };
+      const w = WIDTHS[st.width].px / hit.r.width;
+      const item = st.tool === 'pen' ? { t: 'ink', c: st.color, w, o: 1, p: [[x, y]] } : { t: 'ink', c: st.hlColor, w: Math.max(w * 4.5, 10 / hit.r.width), o: 0.45, hl: true, p: [[x, y]] };
       drawing = { pointerId: e.pointerId, pointerType: e.pointerType, p: hit.p, item, r: hit.r };
       paintInk(hit.p, item);
     } else if (st.tool === 'eraser') {
@@ -434,6 +557,8 @@ export async function mountEditor(root, ctx) {
       eraseAt(drawing, e);
     } else if (st.tool === 'text') {
       drawing = { pointerId: e.pointerId, pointerType: e.pointerType, p: hit.p, r: hit.r, text: [x, y], sx: e.clientX, sy: e.clientY };
+    } else if (st.tool === 'stamp') {
+      drawing = { pointerId: e.pointerId, pointerType: e.pointerType, p: hit.p, r: hit.r, stampAt: [x, y], sx: e.clientX, sy: e.clientY };
     }
   });
 
@@ -500,6 +625,11 @@ export async function mountEditor(root, ctx) {
       changed();
     } else if (d.text && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 12 && e.type !== 'pointercancel') {
       textAt(d.p, d.text[0], d.text[1]);
+    } else if (d.stampAt && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 16 && e.type !== 'pointercancel') {
+      pushHistory();
+      itemsOf(d.p).push({ t: 'stamp', k: st.stamp.k, text: st.stamp.text || '', c: st.color, s: STAMP_SIZES[st.stampSize].s, x: d.stampAt[0], y: d.stampAt[1] });
+      redrawCache(d.p);
+      changed();
     }
   }
   scroll.addEventListener('pointerup', endPointer);
@@ -567,6 +697,9 @@ export async function mountEditor(root, ctx) {
         hit = it.p.some(([x, y]) => Math.hypot(x * r.width - ex, y * r.height - ey) < tol);
       } else if (it.t === 'text') {
         const b = textBox(it, p);
+        hit = ex > b.x - rad && ex < b.x + b.w + rad && ey > b.y - rad && ey < b.y + b.h + rad;
+      } else if (it.t === 'stamp') {
+        const b = stampBoxCss(it, r.width, r.height, p.cache.getContext('2d'));
         hit = ex > b.x - rad && ex < b.x + b.w + rad && ey > b.y - rad && ey < b.y + b.h + rad;
       }
       if (hit) removed = true;
@@ -689,6 +822,7 @@ export async function mountEditor(root, ctx) {
       <div class="panel-sec actions">
         <button class="btn ${copy.status === 'done' ? 'success' : 'primary'} block" data-p="done">${copy.status === 'done' ? '✓ Copie corrigée' : 'Marquer comme corrigée'}</button>
         ${nextId ? `<button class="btn block" data-p="next">Étudiant suivant →</button>` : ''}
+        ${copy.pdf ? `<button class="btn ghost block" data-p="adddoc">📎 Ajouter un document</button>` : ''}
         <button class="btn ghost block" data-p="pdf">⬇ Télécharger le PDF corrigé</button>
       </div>`;
     const ta = $('#comment', panel);
@@ -763,6 +897,9 @@ export async function mountEditor(root, ctx) {
       }
       case 'next':
         return ctx.goto(nextId);
+      case 'adddoc':
+        await ctx.save(copy);
+        return ctx.importPdf(true);
       case 'pdf': {
         b.disabled = true;
         try {
@@ -797,6 +934,7 @@ export async function mountEditor(root, ctx) {
 
   return async function destroy() {
     destroyed = true;
+    life.abort();
     ro.disconnect();
     document.removeEventListener('keydown', onKey);
     clearTimeout(saveTimer);

@@ -1,5 +1,6 @@
 // Fabrique le PDF corrigé : la copie d'origine + les annotations au stylet + une page « Fiche d'évaluation ».
 import { computeResult, studentName, fmtDate } from './util.js';
+import { drawStampPdf } from './stamps.js';
 
 const { PDFDocument, StandardFonts, rgb, LineCapStyle, PageSizes } = window.PDFLib;
 
@@ -64,6 +65,8 @@ export async function buildCorrectedPdf({ copy, student, assignment, cls, settin
     doc = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const safe = makeSafe(font);
+    const boldFont = await doc.embedFont(StandardFonts.HelveticaBold);
+    const safeBold = makeSafe(boldFont);
     // pdf.js sert à convertir nos coordonnées (relatives à la page affichée) en coordonnées PDF,
     // ce qui gère les pages tournées et les marges de cadrage.
     const pj = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise;
@@ -88,6 +91,8 @@ export async function buildCorrectedPdf({ copy, student, assignment, cls, settin
             borderOpacity: it.o ?? 1,
             borderLineCap: LineCapStyle.Round,
           });
+        } else if (it.t === 'stamp') {
+          drawStampPdf(page, it, { toPdf, vpW: vp.width, vpH: vp.height, rgbColor: hexToRgb(it.c), bold: boldFont, safe: safeBold });
         } else if (it.t === 'text' && it.text) {
           const size = it.s * vp.width;
           const lines = String(it.text).split('\n');

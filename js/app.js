@@ -9,6 +9,7 @@ import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
 import * as gmail from './gmail.js';
 import { classData, average, semesterOf, exportClassXlsx, studentRecapPdf } from './reports.js';
 import { readGridFile } from './gridimport.js';
+import { ACCEPT_DOCS, checkSupported, filesToPdfBlob } from './convert.js';
 
 window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
@@ -765,32 +766,66 @@ async function getOrCreateCopy(assignmentId, studentId) {
   return list.find(c => c.studentId === studentId) || { assignmentId, studentId, annotations: {}, evaluation: {}, comment: '', status: 'todo' };
 }
 
-async function attachPdf(copy, file) {
-  if (!/pdf$/i.test(file.type) && !/\.pdf$/i.test(file.name)) throw new Error(`« ${file.name} » n'est pas un PDF.`);
-  copy.pdf = new Blob([await file.arrayBuffer()], { type: 'application/pdf' });
-  copy.fileName = file.name;
-  copy.annotations = {};
-  copy.sentAt = null;
-  await db.put('copies', copy);
+// Ajoute un ou plusieurs documents (PDF, Word .docx, photos) à une copie.
+// append = true : les pages sont ajoutées à la suite (les annotations existantes sont gardées).
+async function attachPdf(copy, files, append = false) {
+  files = Array.isArray(files) ? files : [files];
+  for (const f of files) {
+    const err = checkSupported(f);
+    if (err) throw new Error(err);
+  }
+  const prog = document.createElement('div');
+  prog.className = 'toast show';
+  prog.textContent = 'Préparation du document…';
+  document.body.appendChild(prog);
+  try {
+    const keep = append && copy.pdf instanceof Blob;
+    copy.pdf = await filesToPdfBlob(files, keep ? copy.pdf : null, m => (prog.textContent = m));
+    const names = files.map(f => f.name);
+    copy.fileName = keep && copy.fileName ? [copy.fileName, ...names].join(' + ') : names.join(' + ');
+    if (!keep) copy.annotations = {};
+    copy.sentAt = null;
+    await db.put('copies', copy);
+  } finally {
+    prog.remove();
+  }
+}
+
+// Demande « ajouter à la suite » ou « remplacer » quand la copie a déjà un document.
+async function askAppend(who) {
+  return modal({
+    title: 'Cet élève a déjà une copie',
+    body: `<p>Que faire des nouveaux documents de ${esc(who)} ?</p>`,
+    actions: [
+      { label: 'Annuler', value: null },
+      { label: 'Remplacer la copie', value: 'replace', cls: 'danger' },
+      { label: 'Ajouter à la suite', value: 'append', cls: 'primary' },
+    ],
+  });
 }
 
 async function uploadFor(a, s, existing) {
-  if (existing && existing.pdf && !(await confirmBox('Remplacer la copie', `Remplacer le PDF de ${studentName(s)} ? Les annotations faites sur l'ancien seront perdues (la grille et le commentaire sont gardés).`, 'Remplacer')))
-    return;
-  const [f] = await pickFiles();
-  if (!f) return;
+  let append = false;
+  if (existing && existing.pdf) {
+    const r = await askAppend(studentName(s));
+    if (!r) return;
+    append = r === 'append';
+  }
+  const files = await pickFiles({ accept: ACCEPT_DOCS, multiple: true });
+  if (!files.length) return;
   try {
-    await attachPdf(existing || (await getOrCreateCopy(a.id, s.id)), f);
-    toast('Copie importée', 'success');
+    await attachPdf(existing || (await getOrCreateCopy(a.id, s.id)), files, append);
+    toast(files.length > 1 ? `${files.length} documents ajoutés` : 'Copie importée', 'success');
     router();
   } catch (e) {
+    console.error(e);
     toast(e.message, 'error');
   }
 }
 
 // Import groupé : on devine l'étudiant d'après le nom du fichier.
 function guessStudent(fileName, students) {
-  const n = ' ' + normalize(fileName.replace(/\.pdf$/i, '')).replace(/[^a-z0-9]+/g, ' ') + ' ';
+  const n = ' ' + normalize(fileName.replace(/\.[a-z0-9]+$/i, '')).replace(/[^a-z0-9]+/g, ' ') + ' ';
   const has = w => w && n.includes(' ' + normalize(w).replace(/[^a-z0-9]+/g, ' ').trim() + ' ');
   const both = students.filter(s => has(s.lastName) && has(s.firstName));
   if (both.length === 1) return both[0];
@@ -802,41 +837,43 @@ function guessStudent(fileName, students) {
 }
 
 async function bulkImport(a, students, copies) {
-  const files = await pickFiles({ multiple: true });
+  const files = (await pickFiles({ accept: ACCEPT_DOCS, multiple: true })).sort((x, y) => x.name.localeCompare(y.name, 'fr', { numeric: true }));
   if (!files.length) return;
   const rows = files.map(f => ({ f, s: guessStudent(f.name, students) }));
   const opts = s => `<option value="">— Ne pas importer —</option>${students.map(x => `<option value="${x.id}" ${s && s.id === x.id ? 'selected' : ''}>${esc(studentName(x))}</option>`).join('')}`;
-  let mapping = null;
+  const icon = f => (/\.docx$/i.test(f.name) ? '📝' : /^image\//.test(f.type) ? '🖼' : '📄');
+  let mapping = null,
+    append = true;
+  const hasExisting = copies.some(c => c.pdf);
   const ok = await modal({
-    title: `Importer ${files.length} copie${files.length > 1 ? 's' : ''}`,
+    title: `Importer ${files.length} document${files.length > 1 ? 's' : ''}`,
     wide: true,
-    body: `<p class="muted">Vérifiez à quel étudiant correspond chaque fichier (deviné d'après le nom du fichier).</p>
+    body: `<p class="muted">Vérifiez à quel étudiant correspond chaque fichier (deviné d'après son nom). Plusieurs fichiers pour un même étudiant sont assemblés en une seule copie. Les fichiers Word et les photos sont convertis en PDF.</p>
       <div class="map-list">${rows
-        .map((r, i) => `<div class="map-row"><span class="fname">📄 ${esc(r.f.name)}</span><select class="input" data-i="${i}">${opts(r.s)}</select></div>`)
-        .join('')}</div>`,
+        .map((r, i) => `<div class="map-row"><span class="fname">${icon(r.f)} ${esc(r.f.name)}</span><select class="input" data-i="${i}">${opts(r.s)}</select></div>`)
+        .join('')}</div>
+      ${hasExisting ? '<label class="check"><input type="checkbox" id="append" checked> Si l’élève a déjà une copie, ajouter ces documents à la suite (sinon, la remplacer)</label>' : ''}`,
     actions: [
       { label: 'Annuler', value: false },
       { label: 'Importer', value: true, cls: 'primary' },
     ],
     validate: (v, w) => {
       mapping = $$('select', w).map(s => s.value);
-      const chosen = mapping.filter(Boolean);
-      if (new Set(chosen).size !== chosen.length) {
-        toast('Un même étudiant est choisi pour deux fichiers.', 'error');
-        return false;
-      }
+      if ($('#append', w)) append = $('#append', w).checked;
       return true;
     },
   });
   if (!ok) return;
+  const byStudent = new Map();
+  rows.forEach((r, i) => mapping[i] && byStudent.set(mapping[i], [...(byStudent.get(mapping[i]) || []), r.f]));
   let n = 0;
-  for (let i = 0; i < rows.length; i++) {
-    if (!mapping[i]) continue;
-    const copy = copies.find(c => c.studentId === mapping[i]) || (await getOrCreateCopy(a.id, mapping[i]));
+  for (const [sid, list] of byStudent) {
+    const copy = copies.find(c => c.studentId === sid) || (await getOrCreateCopy(a.id, sid));
     try {
-      await attachPdf(copy, rows[i].f);
+      await attachPdf(copy, list, append);
       n++;
     } catch (e) {
+      console.error(e);
       toast(e.message, 'error');
     }
   }
@@ -998,16 +1035,18 @@ async function correctView(assignmentId, studentId) {
       await db.put('copies', c);
       if (isGroupCopy) await propagateGroup(a, c);
     },
-    importPdf: async () => {
-      const [f] = await pickFiles();
-      if (!f) return;
+    importPdf: async (append = false) => {
+      const files = await pickFiles({ accept: ACCEPT_DOCS, multiple: true });
+      if (!files.length) return;
       try {
-        await attachPdf(copy, f);
+        await attachPdf(copy, files, append);
         router();
       } catch (e) {
+        console.error(e);
         toast(e.message, 'error');
       }
     },
+    saveSettings: st => db.saveSettings(st),
     onDone: async () => {
       const copies = await db.by('copies', 'assignmentId', assignmentId);
       const allDone = students.every(x => copies.some(c => c.studentId === x.id && c.status === 'done'));
