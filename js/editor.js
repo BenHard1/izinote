@@ -219,9 +219,19 @@ export async function mountEditor(root, ctx) {
       pagesEl.innerHTML = `<div class="empty-copy"><p>Impossible d'ouvrir ce PDF (${esc(err.message)}).</p></div>`;
     }
   } else {
-    pagesEl.innerHTML = `<div class="empty-copy"><p>Pas encore de copie PDF pour ${esc(studentName(student))}.</p>
+    const k = ctx.kind;
+    pagesEl.innerHTML =
+      k === 'oral' || k === 'groupe'
+        ? `<div class="empty-copy"><div class="big-ico">${k === 'oral' ? '🎤' : '👥'}</div>
+          <p><b>${k === 'oral' ? 'Évaluation orale' : 'Travail de groupe'}</b> : remplissez la grille et le commentaire à droite${student.isGroup ? ', ils seront reportés sur la fiche de chaque membre du groupe' : ''}.</p>
+          <button class="btn" data-act2="import">Joindre un document PDF (facultatif)</button></div>`
+        : `<div class="empty-copy"><p>Pas encore de copie PDF pour ${esc(studentName(student))}.</p>
       <button class="btn primary" data-act2="import">Importer le PDF</button>
       <p class="muted">Vous pouvez aussi remplir uniquement la grille et le commentaire.</p></div>`;
+    if (!st.panelOpen && (k === 'oral' || k === 'groupe')) {
+      st.panelOpen = true;
+      ed.classList.add('panel-open');
+    }
     $('[data-act2=import]', pagesEl).onclick = () => ctx.importPdf();
   }
 

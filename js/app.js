@@ -2,10 +2,13 @@ import * as db from './db.js';
 import {
   esc, $, $$, modal, form, toast, confirmBox, confirmTyped, pickFiles, download, normalize, studentName,
   computeResult, resultText, newGrid, fmtNum, parseNum, fmtDate, DEFAULT_LEVELS,
+  KINDS, kindLabel, imageToDataUrl, dateOf, shortDate,
 } from './util.js';
 import { mountEditor } from './editor.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
 import * as gmail from './gmail.js';
+import { classData, average, semesterOf, exportClassXlsx, studentRecapPdf } from './reports.js';
+import { readGridFile } from './gridimport.js';
 
 window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
@@ -17,7 +20,7 @@ const routes = [
   [/^$/, home],
   [/^ecole\/(\w+)$/, schoolView],
   [/^classe\/(\w+)$/, classView],
-  [/^etudiant\/(\w+)$/, studentView],
+  [/^etudiant\/(\w+)(?:\/(\w+))?$/, studentView],
   [/^devoir\/(\w+)$/, assignmentView],
   [/^corriger\/(\w+)\/(\w+)$/, correctView],
   [/^grille\/(devoir|modele)\/(\w+)$/, gridView],
@@ -89,6 +92,8 @@ document.addEventListener('click', e => {
 });
 
 // ---------------- Accueil : écoles ----------------
+const schoolLogo = s => (s.logo || s.logoUrl ? `<img class="school-logo" src="${esc(s.logo || s.logoUrl)}" alt="">` : '🏫');
+
 async function home() {
   const schools = (await db.all('schools')).sort(db.sortByName);
   const classes = await db.all('classes');
@@ -104,7 +109,7 @@ async function home() {
         ? `<div class="cards">${schools
             .map(s => {
               const n = classes.filter(c => c.schoolId === s.id).length;
-              return `<a class="card" href="#/ecole/${s.id}"><div class="card-icon">🏫</div><div><h3>${esc(s.name)}</h3><p>${n} classe${n > 1 ? 's' : ''}</p></div></a>`;
+              return `<a class="card" href="#/ecole/${s.id}"><div class="card-icon">${schoolLogo(s)}</div><div><h3>${esc(s.name)}</h3><p>${n} classe${n > 1 ? 's' : ''}</p></div></a>`;
             })
             .join('')}</div>`
         : `<div class="empty"><div class="empty-icon">🏫</div><h2>Bienvenue !</h2><p>Commencez par ajouter votre école (ou votre établissement).<br>Vous y ajouterez ensuite vos classes, vos étudiants et vos devoirs.</p></div>`
@@ -115,8 +120,90 @@ async function home() {
     if (v) {
       const s = await db.put('schools', { name: v.name });
       go('#/ecole/' + s.id);
+      setTimeout(() => editSchoolLogo(s), 300);
     }
   };
+}
+
+// Logo d'une école : depuis une image de la tablette, ou depuis le site web de l'école.
+async function editSchoolLogo(school) {
+  let chosen = school.logo || school.logoUrl || null;
+  let chosenIsUrl = !school.logo && !!school.logoUrl;
+  const r = await modal({
+    title: `Logo – ${school.name}`,
+    body: `
+      <div class="logo-preview" id="lp">${chosen ? `<img src="${esc(chosen)}" alt="">` : '<span class="muted">Pas de logo</span>'}</div>
+      <div class="row wrap"><button class="btn" id="lfile">🖼 Choisir une image</button><button class="btn ghost" id="lnone">Retirer le logo</button></div>
+      <h3 style="margin-top:18px">Ou le chercher sur internet</h3>
+      <p class="muted small">Indiquez l'adresse du site de l'école : IziNote récupère son logo.
+      <a href="https://www.google.com/search?q=${encodeURIComponent(school.name + ' site officiel')}" target="_blank" rel="noopener">Trouver le site de « ${esc(school.name)} »</a></p>
+      <div class="row"><input class="input" id="lsite" placeholder="ex. lycee-jean-moulin.fr" autocapitalize="off" spellcheck="false"><button class="btn" id="lsearch">Chercher</button></div>
+      <div class="logo-choices" id="lchoices"></div>`,
+    actions: [
+      { label: 'Annuler', value: false },
+      { label: 'Enregistrer', value: true, cls: 'primary' },
+    ],
+    onOpen: w => {
+      const show = (src, isUrl) => {
+        chosen = src;
+        chosenIsUrl = isUrl;
+        $('#lp', w).innerHTML = src ? `<img src="${esc(src)}" alt="">` : '<span class="muted">Pas de logo</span>';
+      };
+      $('#lfile', w).onclick = async () => {
+        const [f] = await pickFiles({ accept: 'image/*' });
+        if (!f) return;
+        try {
+          show(await imageToDataUrl(f, 300), false);
+        } catch (e) {
+          toast('Image illisible.', 'error');
+        }
+      };
+      $('#lnone', w).onclick = () => show(null, false);
+      $('#lsearch', w).onclick = () => {
+        let site = $('#lsite', w).value.trim();
+        if (!site) return toast("Indiquez l'adresse du site.", 'error');
+        let domain;
+        try {
+          domain = new URL(/^https?:/i.test(site) ? site : 'https://' + site).hostname;
+        } catch {
+          return toast('Adresse invalide.', 'error');
+        }
+        const cands = [
+          `https://www.google.com/s2/favicons?domain=${domain}&sz=256`,
+          `https://icons.duckduckgo.com/ip3/${domain}.ico`,
+          `https://${domain}/apple-touch-icon.png`,
+        ];
+        const box = $('#lchoices', w);
+        box.innerHTML = '<p class="muted small">Touchez le logo à garder :</p>';
+        cands.forEach(u => {
+          const img = new Image();
+          img.onload = () => {
+            if (img.naturalWidth < 24) return;
+            const b = document.createElement('button');
+            b.className = 'logo-choice';
+            b.appendChild(img);
+            b.onclick = async () => {
+              try {
+                show(await imageToDataUrl(u, 300), false);
+              } catch {
+                show(u, true); // le site interdit la copie : on garde le lien
+              }
+            };
+            box.appendChild(b);
+          };
+          img.src = u;
+        });
+        setTimeout(() => {
+          if (!box.querySelector('.logo-choice')) box.innerHTML = '<p class="muted small">Aucun logo trouvé pour ce site. Vous pouvez enregistrer une image du logo sur la tablette puis la choisir ci-dessus.</p>';
+        }, 4000);
+      };
+    },
+  });
+  if (!r) return;
+  school.logo = chosen && !chosenIsUrl ? chosen : null;
+  school.logoUrl = chosen && chosenIsUrl ? chosen : null;
+  await db.put('schools', school);
+  router();
 }
 
 // ---------------- École : classes ----------------
@@ -128,8 +215,9 @@ async function schoolView(id) {
   for (const c of classes) counts[c.id] = (await db.by('students', 'classId', c.id)).length;
   view.innerHTML = `<div class="page-wrap">
     ${crumbs(await chain({ school }))}
-    <div class="page-head"><h1>${esc(school.name)}</h1>
+    <div class="page-head"><div class="title-logo"><button class="school-logo-btn" id="logo" title="Changer le logo">${schoolLogo(school)}</button><h1>${esc(school.name)}</h1></div>
       <div class="row"><button class="btn primary" id="add">+ Classe</button>${menuButton([
+        { label: "Logo de l'école", act: 'logo' },
         { label: "Renommer l'école", act: 'rename' },
         { label: "Supprimer l'école", act: 'delete', danger: true },
       ])}</div></div>
@@ -140,13 +228,16 @@ async function schoolView(id) {
             .join('')}</div>`
         : `<div class="empty"><div class="empty-icon">👥</div><p>Aucune classe pour l'instant.</p></div>`
     }</div>`;
+  $('#logo').onclick = view.querySelector('[data-act=logo]').onclick = () => editSchoolLogo(school);
   $('#add').onclick = async () => {
     const v = await form('Nouvelle classe', [
       { name: 'name', label: 'Nom de la classe', required: true, placeholder: 'Ex. BTS SIO 1A' },
       { name: 'year', label: 'Année scolaire (facultatif)', placeholder: 'Ex. 2026-2027' },
+      { name: 'sem', label: 'Nom de la première période', value: 'Semestre 1', help: 'Vous pourrez la clôturer plus tard pour passer à la suivante.' },
     ], 'Ajouter');
     if (v) {
-      const c = await db.put('classes', { schoolId: id, name: v.name, year: v.year });
+      const sem = { id: db.uid(), name: v.sem || 'Semestre 1', startedAt: Date.now() };
+      const c = await db.put('classes', { schoolId: id, name: v.name, year: v.year, semesters: [sem], currentSemesterId: sem.id, createdAt: Date.now() });
       go('#/classe/' + c.id);
     }
   };
@@ -167,44 +258,120 @@ async function schoolView(id) {
   };
 }
 
+// ---------------- Semestres ----------------
+// Les classes créées avant l'ajout des semestres reçoivent un « Semestre 1 » qui contient leurs devoirs existants.
+async function ensureSemesters(cls) {
+  if (!cls.semesters || !cls.semesters.length) {
+    const sem = { id: db.uid(), name: 'Semestre 1', startedAt: cls.createdAt || Date.now() };
+    cls.semesters = [sem];
+    cls.currentSemesterId = sem.id;
+    await db.put('classes', cls);
+  }
+  return cls.semesters.find(s => s.id === cls.currentSemesterId) || cls.semesters[cls.semesters.length - 1];
+}
+
+async function closeSemester(cls, current) {
+  const n = cls.semesters.length + 1;
+  let v = null;
+  const ok = await modal({
+    title: 'Clôturer la période',
+    body: `<p>« ${esc(current.name)} » sera archivée : ses devoirs restent consultables dans les archives de la classe, et les nouveaux devoirs iront dans la nouvelle période.</p>
+      <p class="muted small">Conseil : exportez d'abord les notes en Excel pour vos bulletins.</p>
+      <div class="row wrap"><button class="btn" id="xl">📊 Exporter les notes de « ${esc(current.name)} »</button></div>
+      <label class="field"><span>Nom de la période qui se termine</span><input class="input" id="oldName" value="${esc(current.name)}"></label>
+      <label class="field"><span>Nom de la nouvelle période</span><input class="input" id="newName" value="Semestre ${n}"></label>`,
+    actions: [
+      { label: 'Annuler', value: false },
+      { label: 'Clôturer et démarrer la nouvelle période', value: true, cls: 'primary' },
+    ],
+    onOpen: w => {
+      $('#xl', w).onclick = () => exportClassXlsx(cls.id, current.id, current.name).catch(e => toast(e.message, 'error'));
+    },
+    validate: (x, w) => {
+      v = { oldName: $('#oldName', w).value.trim() || current.name, newName: $('#newName', w).value.trim() };
+      if (!v.newName) {
+        toast('Donnez un nom à la nouvelle période.', 'error');
+        return false;
+      }
+      return true;
+    },
+  });
+  if (!ok) return;
+  current.name = v.oldName;
+  current.closedAt = Date.now();
+  const sem = { id: db.uid(), name: v.newName, startedAt: Date.now() };
+  cls.semesters.push(sem);
+  cls.currentSemesterId = sem.id;
+  await db.put('classes', cls);
+  toast(`« ${current.name} » archivée. Bonne rentrée dans « ${sem.name} » !`, 'success');
+  router();
+}
+
+async function chooseSemester(cls, title) {
+  if (cls.semesters.length < 2) return { id: cls.semesters[0].id, name: cls.semesters[0].name };
+  const v = await form(title, [
+    {
+      name: 'sem',
+      label: 'Période',
+      type: 'select',
+      value: cls.currentSemesterId,
+      options: [...cls.semesters.map(s => ({ value: s.id, label: s.name + (s.closedAt ? ' (archivée)' : ' (en cours)') })), { value: 'all', label: 'Toute l’année' }],
+    },
+  ], 'Exporter');
+  if (!v) return null;
+  const s = cls.semesters.find(x => x.id === v.sem);
+  return { id: v.sem, name: s ? s.name : 'Année' };
+}
+
 // ---------------- Classe : devoirs + étudiants ----------------
+function assignmentItem(a, s, nStudents) {
+  const pct = nStudents ? Math.round((s.done / nStudents) * 100) : 0;
+  return `<a class="list-item" href="#/devoir/${a.id}">
+    <div class="li-main"><b>${esc(a.title)}</b><small>${kindLabel(a.kind)}${a.subject ? ' · ' + esc(a.subject) : ''}${a.dueDate ? ' · ' + esc(fmtDate(dateOf(a).getTime())) : ''} · ${a.grid && a.grid.criteria.length ? (a.grid.mode === 'note' ? 'Notation' : 'Acquis / non acquis') : 'Pas de grille'}</small></div>
+    <div class="li-side"><div class="progress"><span style="width:${pct}%"></span></div><small>${s.done}/${nStudents} évalués${s.sent ? ` · ${s.sent} envoyés` : ''}</small></div>
+  </a>`;
+}
+
 async function classView(id) {
   const cls = await db.get('classes', id);
   if (!cls) return go('#/');
+  const current = await ensureSemesters(cls);
   const students = (await db.by('students', 'classId', id)).sort(db.sortStudents);
-  const assignments = (await db.by('assignments', 'classId', id)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const all = (await db.by('assignments', 'classId', id)).sort((a, b) => dateOf(b) - dateOf(a) || (b.createdAt || 0) - (a.createdAt || 0));
   const stats = {};
-  for (const a of assignments) {
+  for (const a of all) {
     const copies = await db.by('copies', 'assignmentId', a.id);
     stats[a.id] = {
       done: copies.filter(c => c.status === 'done' && students.some(s => s.id === c.studentId)).length,
       sent: copies.filter(c => c.sentAt && students.some(s => s.id === c.studentId)).length,
     };
   }
+  const inSem = semId => all.filter(a => semesterOf(cls, a) === semId);
+  const archived = cls.semesters.filter(s => s.id !== current.id).reverse();
   view.innerHTML = `<div class="page-wrap">
     ${crumbs(await chain({ cls }))}
     <div class="page-head"><h1>${esc(cls.name)}${cls.year ? ` <small>${esc(cls.year)}</small>` : ''}</h1>
-      ${menuButton([
-        { label: 'Renommer la classe', act: 'rename' },
-        { label: 'Supprimer la classe (fin d’année)', act: 'delete', danger: true },
-      ])}</div>
+      <div class="row">
+        <button class="btn" id="xls">📊 Exporter les notes</button>
+        ${menuButton([
+          { label: 'Renommer la classe', act: 'rename' },
+          { label: `Clôturer « ${current.name} » et démarrer une nouvelle période`, act: 'close' },
+          { label: 'Supprimer la classe (fin d’année)', act: 'delete', danger: true },
+        ])}</div></div>
 
     <section>
-      <div class="sec-head"><h2>Devoirs & projets</h2><button class="btn primary" id="addA">+ Devoir</button></div>
+      <div class="sec-head"><h2>Évaluations <span class="chip">${esc(current.name)}</span></h2><button class="btn primary" id="addA">+ Évaluation</button></div>
       ${
-        assignments.length
-          ? `<div class="list">${assignments
-              .map(a => {
-                const s = stats[a.id];
-                const pct = students.length ? Math.round((s.done / students.length) * 100) : 0;
-                return `<a class="list-item" href="#/devoir/${a.id}">
-                  <div class="li-main"><b>${esc(a.title)}</b><small>${a.kind === 'projet' ? 'Projet' : 'Devoir'}${a.dueDate ? ' · ' + esc(fmtDate(new Date(a.dueDate).getTime())) : ''} · ${a.grid && a.grid.criteria.length ? (a.grid.mode === 'note' ? 'Notation' : 'Acquis / non acquis') : 'Pas de grille'}</small></div>
-                  <div class="li-side"><div class="progress"><span style="width:${pct}%"></span></div><small>${s.done}/${students.length} corrigées${s.sent ? ` · ${s.sent} envoyées` : ''}</small></div>
-                </a>`;
-              })
-              .join('')}</div>`
-          : `<p class="muted">Aucun devoir. Ajoutez un devoir ou un projet pour y déposer les copies.</p>`
+        inSem(current.id).length
+          ? `<div class="list">${inSem(current.id).map(a => assignmentItem(a, stats[a.id], students.length)).join('')}</div>`
+          : `<p class="muted">Aucune évaluation pour cette période. Ajoutez un devoir, un projet, un oral ou un travail de groupe.</p>`
       }
+      ${archived
+        .map(
+          sem => `<details class="archive"><summary>🗄 ${esc(sem.name)} <small class="muted">archivée${sem.closedAt ? ' le ' + fmtDate(sem.closedAt) : ''} · ${inSem(sem.id).length} évaluation${inSem(sem.id).length > 1 ? 's' : ''}</small></summary>
+          <div class="list">${inSem(sem.id).map(a => assignmentItem(a, stats[a.id], students.length)).join('') || '<p class="muted" style="padding:12px">Aucune évaluation.</p>'}</div></details>`
+        )
+        .join('')}
     </section>
 
     <section>
@@ -216,7 +383,7 @@ async function classView(id) {
               .map(
                 s => `<div class="list-item">
                 <a class="li-main" href="#/etudiant/${s.id}"><b>${esc(studentName(s))}</b><small>${s.email ? esc(s.email) : '<span class="warn">pas d’e-mail</span>'}</small></a>
-                <div class="row"><button class="icon-btn" data-edit="${s.id}" title="Modifier">✎</button><button class="icon-btn" data-del="${s.id}" title="Supprimer">🗑</button></div>
+                <div class="row"><a class="btn small ghost" href="#/etudiant/${s.id}">Récap</a><button class="icon-btn" data-edit="${s.id}" title="Modifier">✎</button><button class="icon-btn" data-del="${s.id}" title="Supprimer">🗑</button></div>
               </div>`
               )
               .join('')}</div>`
@@ -226,14 +393,26 @@ async function classView(id) {
   </div>`;
 
   $('#addA').onclick = async () => {
-    const v = await form('Nouveau devoir ou projet', [
+    const subjects = [...new Set([...all.map(a => a.subject), ...(await db.all('grids')).map(g => g.subject)].filter(Boolean))].sort();
+    const v = await form('Nouvelle évaluation', [
       { name: 'title', label: 'Titre', required: true, placeholder: 'Ex. Exercice 3 – Les fonctions' },
-      { name: 'kind', label: 'Type (devoir ou projet)', value: 'devoir' },
-      { name: 'dueDate', label: 'Date (facultatif)', type: 'date' },
+      { name: 'kind', label: 'Type', type: 'select', value: 'devoir', options: KINDS },
+      { name: 'subject', label: 'Matière (facultatif)', datalist: subjects, placeholder: 'Ex. Mathématiques' },
+      { name: 'dueDate', label: 'Date', type: 'date', value: new Date().toISOString().slice(0, 10) },
     ], 'Créer');
     if (!v) return;
-    const a = await db.put('assignments', { classId: id, title: v.title, kind: /proj/i.test(v.kind) ? 'projet' : 'devoir', dueDate: v.dueDate, grid: newGrid('note'), createdAt: Date.now() });
+    const a = await db.put('assignments', { classId: id, semesterId: current.id, title: v.title, kind: v.kind, subject: v.subject, dueDate: v.dueDate, grid: newGrid('note'), groups: [], createdAt: Date.now() });
     go('#/devoir/' + a.id);
+  };
+  $('#xls').onclick = async () => {
+    const sem = await chooseSemester(cls, 'Exporter les notes (Excel)');
+    if (!sem) return;
+    try {
+      await exportClassXlsx(id, sem.id, sem.name);
+    } catch (e) {
+      console.error(e);
+      toast(e.message, 'error');
+    }
   };
   $('#addS').onclick = () => editStudent(null, id);
   $('#importS').onclick = () => importStudents(id);
@@ -248,13 +427,17 @@ async function classView(id) {
         }
       })
   );
+  view.querySelector('[data-act=close]').onclick = () => closeSemester(cls, current);
   view.querySelector('[data-act=rename]').onclick = async () => {
     const v = await form('Modifier la classe', [
       { name: 'name', label: 'Nom', value: cls.name, required: true },
       { name: 'year', label: 'Année scolaire', value: cls.year || '' },
+      { name: 'sem', label: 'Nom de la période en cours', value: current.name, required: true },
     ]);
     if (v) {
-      Object.assign(cls, v);
+      cls.name = v.name;
+      cls.year = v.year;
+      current.name = v.sem;
       await db.put('classes', cls);
       router();
     }
@@ -263,7 +446,7 @@ async function classView(id) {
     if (
       await confirmTyped(
         'Supprimer la classe',
-        `La classe « ${cls.name} », ses ${students.length} étudiants, ses ${assignments.length} devoirs et toutes les copies seront définitivement supprimés. Pensez à faire une sauvegarde avant (Réglages).`,
+        `La classe « ${cls.name} », ses ${students.length} étudiants, ses ${all.length} évaluations et toutes les copies seront définitivement supprimés. Pensez à exporter les notes et à faire une sauvegarde avant (Réglages).`,
         cls.name
       )
     ) {
@@ -334,37 +517,78 @@ async function importStudents(classId) {
   router();
 }
 
-// ---------------- Étudiant : toutes ses copies ----------------
-async function studentView(id) {
+// ---------------- Étudiant : récapitulatif (livret scolaire) ----------------
+async function studentView(id, semParam) {
   const s = await db.get('students', id);
   if (!s) return go('#/');
   const cls = await db.get('classes', s.classId);
-  const assignments = (await db.by('assignments', 'classId', s.classId)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  const copies = await db.by('copies', 'studentId', id);
+  const current = await ensureSemesters(cls);
+  const semId = semParam || current.id;
+  const { assignments, copyOf } = await classData(s.classId, semId);
+  assignments.reverse();
+  const avg = average(assignments, copyOf, s);
+  const semName = semId === 'all' ? 'Toute l’année' : (cls.semesters.find(x => x.id === semId) || current).name;
+  const comps = {};
+  for (const a of assignments) {
+    const c = copyOf(a, s);
+    if (!c || c.status !== 'done' || !a.grid || a.grid.mode !== 'acquis') continue;
+    for (const cr of a.grid.criteria) {
+      const v = c.evaluation[cr.id];
+      if (v == null) continue;
+      (comps[cr.label] = comps[cr.label] || []).push({ a, level: a.grid.levels[v], top: v === a.grid.levels.length - 1, idx: v, n: a.grid.levels.length });
+    }
+  }
+  const groupName = a => (a.groups || []).find(g => g.studentIds.includes(id))?.name;
   view.innerHTML = `<div class="page-wrap">
     ${crumbs([...(await chain({ cls })), { label: studentName(s) }])}
-    <div class="page-head"><h1>${esc(studentName(s))}</h1><button class="btn" id="edit">✎ Modifier</button></div>
+    <div class="page-head"><h1>${esc(studentName(s))}</h1>
+      <div class="row"><button class="btn primary" id="pdf">⬇ Récap PDF</button><button class="btn" id="edit">✎ Modifier</button></div></div>
     <p class="muted">${s.email ? esc(s.email) : 'Pas d’adresse e-mail'}</p>
+    <div class="seg">${[...cls.semesters.map(x => ({ id: x.id, name: x.name })), { id: 'all', name: 'Toute l’année' }]
+      .map(x => `<a class="${x.id === semId ? 'on' : ''}" href="#/etudiant/${id}/${x.id}">${esc(x.name)}</a>`)
+      .join('')}</div>
+    <div class="summary" style="margin-top:12px">
+      <div class="sum-box"><b>${avg == null ? '–' : fmtNum(avg)}</b><span>moyenne /20</span></div>
+      <div class="sum-box"><b>${assignments.filter(a => copyOf(a, s)?.status === 'done').length}/${assignments.length}</b><span>évaluations faites</span></div>
+    </div>
+    <h2>Évaluations · ${esc(semName)}</h2>
     <div class="list">${
       assignments
         .map(a => {
-          const c = copies.find(x => x.assignmentId === a.id);
+          const c = copyOf(a, s);
           const r = c ? computeResult(a.grid, c.evaluation) : null;
-          return `<a class="list-item" href="#/corriger/${a.id}/${id}"><div class="li-main"><b>${esc(a.title)}</b><small>${statusLabel(c)}</small></div><div class="li-side">${r && r.short && c.status === 'done' ? `<span class="score">${esc(r.short)}</span>` : ''}</div></a>`;
+          const g = groupName(a);
+          return `<a class="list-item" href="#/corriger/${a.id}/${id}"><div class="li-main"><b>${esc(a.title)}</b>
+            <small>${kindLabel(a.kind)}${g ? ' · ' + esc(g) : ''}${a.subject ? ' · ' + esc(a.subject) : ''} · ${esc(shortDate(dateOf(a)))} · ${statusLabel(c, a)}</small>
+            ${c && c.status === 'done' && c.comment ? `<small class="comment-snip">« ${esc(c.comment.slice(0, 140))}${c.comment.length > 140 ? '…' : ''} »</small>` : ''}</div>
+            <div class="li-side">${r && r.short && c.status === 'done' ? `<span class="score">${esc(r.short)}</span>` : ''}</div></a>`;
         })
-        .join('') || '<p class="muted">Aucun devoir dans cette classe.</p>'
-    }</div></div>`;
+        .join('') || '<p class="muted" style="padding:14px">Aucune évaluation sur cette période.</p>'
+    }</div>
+    ${
+      Object.keys(comps).length
+        ? `<h2>Compétences</h2><div class="list">${Object.entries(comps)
+            .map(
+              ([label, list]) => `<div class="list-item"><div class="li-main"><b>${esc(label)}</b><small>${list.map(x => esc(x.a.title)).join(' · ')}</small></div>
+              <div class="li-side row">${list.map(x => `<span class="lvl on lvl-${Math.round((x.idx / Math.max(1, x.n - 1)) * 2)}">${esc(x.level)}</span>`).join('')}</div></div>`
+            )
+            .join('')}</div>`
+        : ''
+    }
+  </div>`;
   $('#edit').onclick = () => editStudent(s, s.classId);
+  $('#pdf').onclick = () => studentRecapPdf(s, semId, semName).catch(e => toast(e.message, 'error'));
 }
 
-function statusLabel(c) {
-  if (!c || (!c.pdf && c.status !== 'done')) return '<span class="tag">Pas de copie</span>';
+function statusLabel(c, a) {
+  const noCopy = a && (a.kind === 'oral' || a.kind === 'groupe');
+  if (!c || (!c.pdf && c.status !== 'done')) return noCopy ? '<span class="tag todo">À évaluer</span>' : '<span class="tag">Pas de copie</span>';
   if (c.sentAt) return `<span class="tag sent">Envoyée le ${fmtDate(c.sentAt)}</span>`;
-  if (c.status === 'done') return '<span class="tag done">Corrigée</span>';
+  if (c.status === 'done') return `<span class="tag done">${noCopy ? 'Évalué' : 'Corrigée'}</span>`;
   return '<span class="tag todo">À corriger</span>';
 }
 
-// ---------------- Devoir : copies de la classe ----------------
+// ---------------- Devoir / oral / groupe ----------------
 async function assignmentView(id) {
   const a = await db.get('assignments', id);
   if (!a) return go('#/');
@@ -376,52 +600,93 @@ async function assignmentView(id) {
   const sent = students.filter(s => copyOf(s.id)?.sentAt).length;
   const allDone = students.length > 0 && done === students.length;
   const grid = a.grid || newGrid();
+  const isGroup = a.kind === 'groupe';
+  const isOral = a.kind === 'oral';
+  const groups = a.groups || [];
+  const groupOf = sid => groups.find(g => g.studentIds.includes(sid));
+
+  const studentRow = s => {
+    const c = copyOf(s.id);
+    const r = c ? computeResult(grid, c.evaluation) : null;
+    const g = groupOf(s.id);
+    return `<div class="list-item">
+      <a class="li-main" href="#/corriger/${id}/${s.id}"><b>${esc(studentName(s))}</b><small>${statusLabel(c, a)}${g ? ' · 👥 ' + esc(g.name) + (c && c.override ? ' (note individualisée)' : '') : ''}${c && c.fileName ? ' · ' + esc(c.fileName) : ''}</small></a>
+      <div class="li-side row">
+        ${r && r.short && (c.status === 'done' || Object.keys(c.evaluation || {}).length) ? `<span class="score ${c.status === 'done' ? '' : 'partial'}">${esc(r.short)}</span>` : ''}
+        ${isOral || isGroup ? '' : `<button class="icon-btn" data-up="${s.id}" title="${c && c.pdf ? 'Remplacer le PDF' : 'Importer le PDF'}">📎</button>`}
+        <a class="btn small ${c && c.status === 'done' ? '' : (c && c.pdf) || isOral ? 'primary' : ''}" href="#/corriger/${id}/${s.id}">${c && c.status === 'done' ? 'Revoir' : isOral || isGroup ? 'Évaluer' : 'Corriger'}</a>
+      </div></div>`;
+  };
 
   view.innerHTML = `<div class="page-wrap">
     ${crumbs([...(await chain({ cls })), { label: a.title }])}
-    <div class="page-head"><h1>${esc(a.title)}</h1>${menuButton([
-      { label: 'Renommer', act: 'rename' },
-      { label: 'Supprimer ce devoir', act: 'delete', danger: true },
+    <div class="page-head"><div><h1>${esc(a.title)}</h1><p class="muted" style="margin:4px 0 0">${kindLabel(a.kind)}${a.subject ? ' · ' + esc(a.subject) : ''} · ${esc(shortDate(dateOf(a)))}</p></div>${menuButton([
+      { label: 'Modifier (titre, type, matière, date)', act: 'rename' },
+      { label: 'Supprimer cette évaluation', act: 'delete', danger: true },
     ])}</div>
 
     <div class="summary">
-      <div class="sum-box"><b>${done}/${students.length}</b><span>corrigées</span></div>
+      <div class="sum-box"><b>${done}/${students.length}</b><span>${isOral || isGroup ? 'évalués' : 'corrigées'}</span></div>
       <div class="sum-box"><b>${sent}</b><span>envoyées</span></div>
       <div class="sum-box grow"><span>Grille : ${grid.criteria.length ? `${grid.mode === 'note' ? 'notation' + (grid.scaleTo ? ' sur ' + grid.scaleTo : '') : 'acquis / non acquis'}, ${grid.criteria.length} critère${grid.criteria.length > 1 ? 's' : ''}` : '<span class="warn">à créer</span>'}</span>
         <a class="btn small" href="#/grille/devoir/${id}">${grid.criteria.length ? 'Modifier la grille' : 'Créer la grille'}</a></div>
     </div>
 
-    ${allDone && sent < students.length ? `<div class="banner success">✓ Toute la classe est corrigée. Vous pouvez envoyer les corrections.</div>` : ''}
+    ${allDone && sent < students.length ? `<div class="banner success">✓ Toute la classe est évaluée. Vous pouvez envoyer les résultats.</div>` : ''}
 
     <div class="row wrap actions-bar">
-      <button class="btn" id="import">📄 Importer des copies (PDF)</button>
-      <button class="btn primary" id="send" ${done ? '' : 'disabled'}>✉ Envoyer les corrections</button>
-      <button class="btn ghost" id="dlAll" ${done ? '' : 'disabled'}>⬇ Télécharger les corrigés</button>
+      ${isOral || isGroup ? '' : '<button class="btn" id="import">📄 Importer des copies (PDF)</button>'}
+      <button class="btn primary" id="send" ${done ? '' : 'disabled'}>✉ Envoyer ${isOral || isGroup ? 'les résultats' : 'les corrections'}</button>
+      <button class="btn ghost" id="dlAll" ${done ? '' : 'disabled'}>⬇ Télécharger les fiches</button>
     </div>
 
-    <div class="list">${
-      students
-        .map(s => {
-          const c = copyOf(s.id);
-          const r = c ? computeResult(grid, c.evaluation) : null;
-          return `<div class="list-item">
-          <a class="li-main" href="#/corriger/${id}/${s.id}"><b>${esc(studentName(s))}</b><small>${statusLabel(c)}${c && c.fileName ? ' · ' + esc(c.fileName) : ''}</small></a>
-          <div class="li-side row">
-            ${r && r.short && (c.status === 'done' || Object.keys(c.evaluation || {}).length) ? `<span class="score ${c.status === 'done' ? '' : 'partial'}">${esc(r.short)}</span>` : ''}
-            <button class="icon-btn" data-up="${s.id}" title="${c && c.pdf ? 'Remplacer le PDF' : 'Importer le PDF'}">📎</button>
-            <a class="btn small ${c && c.pdf && c.status !== 'done' ? 'primary' : ''}" href="#/corriger/${id}/${s.id}">${c && c.status === 'done' ? 'Revoir' : 'Corriger'}</a>
-          </div></div>`;
-        })
-        .join('') || `<p class="muted">Aucun étudiant dans cette classe. <a href="#/classe/${cls.id}">Ajoutez-les ici.</a></p>`
-    }</div></div>`;
+    ${
+      isGroup
+        ? `<section><div class="sec-head"><h2>Groupes <small>(${groups.length})</small></h2><button class="btn primary" id="addG">+ Groupe</button></div>
+          <p class="muted small">Évaluez le groupe une fois : la note, la grille et le commentaire sont reportés automatiquement sur la fiche de chaque membre. Pour individualiser la note d'un élève, ouvrez sa ligne plus bas.</p>
+          ${
+            groups.length
+              ? `<div class="list">${groups
+                  .map(g => {
+                    const gc = copyOf('g_' + g.id);
+                    const r = gc ? computeResult(grid, gc.evaluation) : null;
+                    return `<div class="list-item"><a class="li-main" href="#/corriger/${id}/g_${g.id}"><b>👥 ${esc(g.name)}</b><small>${g.studentIds.map(sid => students.find(s => s.id === sid)).filter(Boolean).map(studentName).map(esc).join(', ') || 'Aucun membre'}</small></a>
+                    <div class="li-side row">${r && r.short && gc.status === 'done' ? `<span class="score">${esc(r.short)}</span>` : ''}
+                      <button class="icon-btn" data-editg="${g.id}" title="Modifier le groupe">✎</button><button class="icon-btn" data-delg="${g.id}" title="Supprimer le groupe">🗑</button>
+                      <a class="btn small ${gc && gc.status === 'done' ? '' : 'primary'}" href="#/corriger/${id}/g_${g.id}">${gc && gc.status === 'done' ? 'Revoir' : 'Évaluer'}</a></div></div>`;
+                  })
+                  .join('')}</div>`
+              : '<p class="muted">Aucun groupe. Créez les groupes puis évaluez-les.</p>'
+          }</section><h2>Élèves</h2>`
+        : ''
+    }
 
-  $('#import').onclick = () => bulkImport(a, students, copies);
+    <div class="list">${students.map(studentRow).join('') || `<p class="muted" style="padding:14px">Aucun étudiant dans cette classe. <a href="#/classe/${cls.id}">Ajoutez-les ici.</a></p>`}</div></div>`;
+
+  if ($('#import')) $('#import').onclick = () => bulkImport(a, students, copies);
   $$('[data-up]').forEach(b => (b.onclick = () => uploadFor(a, students.find(s => s.id === b.dataset.up), copyOf(b.dataset.up))));
   $('#send').onclick = () => sendDialog(a, cls, students, copies);
   $('#dlAll').onclick = () => downloadAll(a, cls, students, copies);
+  if ($('#addG')) $('#addG').onclick = () => editGroup(a, students, null);
+  $$('[data-editg]').forEach(b => (b.onclick = () => editGroup(a, students, groups.find(g => g.id === b.dataset.editg))));
+  $$('[data-delg]').forEach(
+    b =>
+      (b.onclick = async () => {
+        const g = groups.find(x => x.id === b.dataset.delg);
+        if (!(await confirmBox('Supprimer le groupe', `Supprimer « ${g.name} » ? Les notes déjà reportées sur les fiches des élèves sont conservées.`, 'Supprimer', true))) return;
+        a.groups = groups.filter(x => x !== g);
+        const gc = copyOf('g_' + g.id);
+        if (gc) await db.del('copies', gc.id);
+        await db.put('assignments', a);
+        router();
+      })
+  );
   view.querySelector('[data-act=rename]').onclick = async () => {
-    const v = await form('Modifier le devoir', [
+    const subjects = [...new Set((await db.all('assignments')).map(x => x.subject).filter(Boolean))].sort();
+    const v = await form('Modifier l’évaluation', [
       { name: 'title', label: 'Titre', value: a.title, required: true },
+      { name: 'kind', label: 'Type', type: 'select', value: a.kind || 'devoir', options: KINDS },
+      { name: 'subject', label: 'Matière', value: a.subject || '', datalist: subjects },
       { name: 'dueDate', label: 'Date', type: 'date', value: a.dueDate || '' },
     ]);
     if (v) {
@@ -431,11 +696,68 @@ async function assignmentView(id) {
     }
   };
   view.querySelector('[data-act=delete]').onclick = async () => {
-    if (await confirmTyped('Supprimer le devoir', 'Toutes les copies et corrections de ce devoir seront supprimées.', a.title)) {
+    if (await confirmTyped('Supprimer l’évaluation', 'Toutes les copies et évaluations liées seront supprimées.', a.title)) {
       await db.deleteAssignment(id);
       go('#/classe/' + cls.id);
     }
   };
+}
+
+async function editGroup(a, students, g) {
+  const others = (a.groups || []).filter(x => x !== g);
+  const taken = sid => others.find(x => x.studentIds.includes(sid));
+  let v = null;
+  const ok = await modal({
+    title: g ? 'Modifier le groupe' : 'Nouveau groupe',
+    body: `<label class="field"><span>Nom du groupe</span><input class="input" id="gname" value="${esc(g ? g.name : 'Groupe ' + (others.length + 1))}"></label>
+      <div class="field"><span>Membres</span><div class="send-list">${students
+        .map(s => {
+          const t = taken(s.id);
+          return `<label class="send-row ${t ? 'disabled' : ''}"><input type="checkbox" value="${s.id}" ${g && g.studentIds.includes(s.id) ? 'checked' : ''} ${t ? 'disabled' : ''}><span class="sr-name">${esc(studentName(s))}</span><span class="sr-status">${t ? esc(t.name) : ''}</span></label>`;
+        })
+        .join('')}</div></div>`,
+    actions: [
+      { label: 'Annuler', value: false },
+      { label: 'Enregistrer', value: true, cls: 'primary' },
+    ],
+    validate: (x, w) => {
+      v = { name: $('#gname', w).value.trim(), ids: $$('input[type=checkbox]:checked', w).map(i => i.value) };
+      if (!v.name) return toast('Donnez un nom au groupe.', 'error'), false;
+      if (!v.ids.length) return toast('Choisissez au moins un membre.', 'error'), false;
+      return true;
+    },
+  });
+  if (!ok) return;
+  if (g) Object.assign(g, { name: v.name, studentIds: v.ids });
+  else (a.groups = a.groups || []).push({ id: db.uid(), name: v.name, studentIds: v.ids });
+  await db.put('assignments', a);
+  // si le groupe était déjà évalué, on reporte sur les (nouveaux) membres
+  const gid = (g || a.groups[a.groups.length - 1]).id;
+  const gc = (await db.by('copies', 'assignmentId', a.id)).find(c => c.studentId === 'g_' + gid);
+  if (gc) await propagateGroup(a, gc);
+  router();
+}
+
+// Reporte l'évaluation d'un groupe sur la fiche de chacun de ses membres (sauf note individualisée).
+async function propagateGroup(a, gc) {
+  const g = (a.groups || []).find(x => 'g_' + x.id === gc.studentId);
+  if (!g) return;
+  const copies = await db.by('copies', 'assignmentId', a.id);
+  for (const sid of g.studentIds) {
+    const mc = copies.find(c => c.studentId === sid) || { assignmentId: a.id, studentId: sid };
+    if (mc.override) continue;
+    Object.assign(mc, {
+      evaluation: JSON.parse(JSON.stringify(gc.evaluation || {})),
+      comment: gc.comment || '',
+      status: gc.status,
+      correctedAt: gc.correctedAt,
+      annotations: JSON.parse(JSON.stringify(gc.annotations || {})),
+      pdf: gc.pdf || null,
+      fileName: gc.fileName || null,
+      fromGroup: g.id,
+    });
+    await db.put('copies', mc);
+  }
 }
 
 async function getOrCreateCopy(assignmentId, studentId) {
@@ -642,28 +964,39 @@ async function sendDialog(a, cls, students, copies) {
 // ---------------- Correction d'une copie ----------------
 async function correctView(assignmentId, studentId) {
   const a = await db.get('assignments', assignmentId);
-  const s = await db.get('students', studentId);
-  if (!a || !s) return go('#/');
+  if (!a) return go('#/');
+  const isGroupCopy = studentId.startsWith('g_');
+  const group = isGroupCopy ? (a.groups || []).find(g => 'g_' + g.id === studentId) : null;
+  const s = isGroupCopy ? group && { id: studentId, firstName: '👥 ' + group.name, lastName: '', isGroup: true } : await db.get('students', studentId);
+  if (!s) return go('#/devoir/' + assignmentId);
   const cls = await db.get('classes', a.classId);
   const students = (await db.by('students', 'classId', a.classId)).sort(db.sortStudents);
   const copy = await getOrCreateCopy(assignmentId, studentId);
   const settings = await db.getSettings();
   document.body.classList.add('fullscreen');
-  let dirty = false;
+  // copie de groupe : sert à savoir si un membre a été individualisé
+  const memberGroup = !isGroupCopy && (a.groups || []).find(g => g.studentIds.includes(studentId));
+  const groupCopy = memberGroup ? await getOrCreateCopy(assignmentId, 'g_' + memberGroup.id) : null;
+  const sig = c => JSON.stringify([c.evaluation || {}, c.comment || '', c.status || 'todo']);
+  const initialSig = sig(copy);
   const ctx = {
     copy,
     student: s,
     assignment: a,
     cls,
     settings,
-    order: students.map(x => x.id),
+    kind: a.kind || 'devoir',
+    order: isGroupCopy ? (a.groups || []).map(g => 'g_' + g.id) : students.map(x => x.id),
     exit: () => go('#/devoir/' + assignmentId),
     goto: sid => go(`#/corriger/${assignmentId}/${sid}`),
     editGrid: () => go('#/grille/devoir/' + assignmentId),
     save: async c => {
       // on n'enregistre une copie vide (sans PDF ni saisie) que si quelque chose a été fait
       const touched = c.pdf || c.comment || Object.keys(c.evaluation || {}).length || c.status === 'done' || c.id;
-      if (touched) await db.put('copies', c);
+      if (!touched) return;
+      if (memberGroup && groupCopy && groupCopy.id && sig(c) !== initialSig) c.override = sig(c) !== sig(groupCopy);
+      await db.put('copies', c);
+      if (isGroupCopy) await propagateGroup(a, c);
     },
     importPdf: async () => {
       const [f] = await pickFiles();
@@ -715,6 +1048,7 @@ async function gridView(kind, id) {
     back = '#/grilles';
   }
   grid.levels = grid.levels && grid.levels.length ? grid.levels : [...DEFAULT_LEVELS];
+  const allSubjects = [...new Set([...(await db.all('grids')).map(g => g.subject), ...(await db.all('assignments')).map(x => x.subject)].filter(Boolean))].sort((x, y) => x.localeCompare(y, 'fr'));
   let crumbsHtml = '';
   if (kind === 'devoir') {
     const cls = await db.get('classes', owner.classId);
@@ -726,6 +1060,9 @@ async function gridView(kind, id) {
       ${crumbsHtml}
       <div class="page-head"><h1>${esc(title)}</h1></div>
       ${kind === 'modele' ? `<label class="field"><span>Nom de la grille</span><input class="input" id="gname" value="${esc(owner.name)}" placeholder="Ex. Grille exposé oral"></label>` : ''}
+      <label class="field"><span>Matière</span><input class="input" id="gsubject" list="dl-subj" value="${esc(owner.subject || '')}" placeholder="Ex. Mathématiques"><datalist id="dl-subj">${allSubjects.map(x => `<option value="${esc(x)}">`).join('')}</datalist></label>
+      <div class="import-box"><div><b>📷 Votre grille existe déjà sur papier ou en PDF ?</b><p class="muted small">IziNote la lit et remplit les critères pour vous (vous vérifiez ensuite).</p></div>
+        <div class="row wrap"><button class="btn" id="impGrid">Importer un PDF ou une photo</button><button class="btn ghost" id="camGrid">📸 Photographier</button></div></div>
       <div class="seg">
         <button class="${grid.mode === 'note' ? 'on' : ''}" data-mode="note">Notation (points)</button>
         <button class="${grid.mode === 'acquis' ? 'on' : ''}" data-mode="acquis">Acquis / non acquis</button>
@@ -762,6 +1099,7 @@ async function gridView(kind, id) {
     $$('[data-lvl]').forEach(i => (grid.levels[+i.dataset.lvl] = i.value));
     if ($('#scale')) grid.scaleTo = parseNum($('#scale').value);
     if ($('#gname')) owner.name = $('#gname').value.trim();
+    if ($('#gsubject')) owner.subject = $('#gsubject').value.trim();
   };
   const bind = () => {
     $$('[data-mode]').forEach(
@@ -773,6 +1111,64 @@ async function gridView(kind, id) {
           render();
         })
     );
+    const importGrid = async capture => {
+      read();
+      const files = await pickFiles({ accept: capture ? 'image/*' : 'application/pdf,image/*', capture });
+      if (!files.length) return;
+      const prog = document.createElement('div');
+      prog.className = 'toast show';
+      prog.textContent = 'Lecture de la grille…';
+      document.body.appendChild(prog);
+      let res;
+      try {
+        res = await readGridFile(files[0], m => (prog.textContent = m));
+      } catch (e) {
+        console.error(e);
+        prog.remove();
+        return toast('Lecture impossible : ' + e.message, 'error');
+      }
+      prog.remove();
+      if (!res.criteria.length) return toast('Aucun critère reconnu. Essayez une photo plus nette et bien droite, ou saisissez la grille à la main.', 'error');
+      let lines = null,
+        mode = res.mode;
+      const ok = await modal({
+        title: 'Vérifiez la grille lue',
+        wide: true,
+        body: `<p class="muted small">Une ligne par critère. Pour les points, terminez la ligne par « | nombre ». Corrigez ce qui a été mal lu et supprimez les lignes inutiles.</p>
+          <div class="seg"><button data-m="note" class="${mode === 'note' ? 'on' : ''}">Notation (points)</button><button data-m="acquis" class="${mode === 'acquis' ? 'on' : ''}">Acquis / non acquis</button></div>
+          <textarea class="input" id="glines" rows="12">${esc(res.criteria.map(c => c.label + (c.max != null ? ' | ' + fmtNum(c.max) : '')).join('\n'))}</textarea>
+          <label class="check"><input type="checkbox" id="greplace" ${grid.criteria.length ? '' : 'checked'}> Remplacer les critères actuels (sinon ils sont ajoutés à la suite)</label>`,
+        actions: [{ label: 'Annuler', value: false }, { label: 'Utiliser cette grille', value: true, cls: 'primary' }],
+        onOpen: w =>
+          $$('[data-m]', w).forEach(
+            b =>
+              (b.onclick = () => {
+                mode = b.dataset.m;
+                $$('[data-m]', w).forEach(x => x.classList.toggle('on', x === b));
+              })
+          ),
+        validate: (x, w) => {
+          lines = { text: $('#glines', w).value, replace: $('#greplace', w).checked };
+          return true;
+        },
+      });
+      if (!ok) return;
+      const crits = lines.text
+        .split('\n')
+        .map(l => l.trim())
+        .filter(Boolean)
+        .map(l => {
+          const [label, pts] = l.split('|').map(x => x.trim());
+          return { id: db.uid(), label, max: parseNum(pts) ?? 2 };
+        });
+      grid.mode = mode;
+      if (mode === 'note' && grid.scaleTo == null) grid.scaleTo = 20;
+      grid.criteria = lines.replace ? crits : [...grid.criteria, ...crits];
+      render();
+      toast(`${crits.length} critère${crits.length > 1 ? 's' : ''} importé${crits.length > 1 ? 's' : ''} : vérifiez puis enregistrez.`, 'success');
+    };
+    $('#impGrid').onclick = () => importGrid(false);
+    $('#camGrid').onclick = () => importGrid(true);
     $('#addC').onclick = () => {
       read();
       grid.criteria.push({ id: db.uid(), label: '', max: 4 });
@@ -815,7 +1211,10 @@ async function gridView(kind, id) {
         let chosen = null;
         const ok = await modal({
           title: 'Choisir une grille modèle',
-          body: `<div class="list">${grids.map(g => `<label class="list-item check"><input type="radio" name="g" value="${g.id}"> <b>${esc(g.name)}</b> <small>${g.grid.criteria.length} critères · ${g.grid.mode === 'note' ? 'notation' : 'acquis'}</small></label>`).join('')}</div>
+          body: `${groupBySubject(grids)
+            .sort(([x], [y]) => (y === owner.subject) - (x === owner.subject))
+            .map(([subj, list]) => `<h3 class="subj-title">📚 ${esc(subj)}</h3><div class="list">${list.map(g => `<label class="list-item check"><input type="radio" name="g" value="${g.id}"> <b>${esc(g.name)}</b> <small>${g.grid.criteria.length} critères · ${g.grid.mode === 'note' ? 'notation' : 'acquis'}</small></label>`).join('')}</div>`)
+            .join('')}
             <p class="muted small">La grille actuelle de ce devoir sera remplacée par une copie du modèle.</p>`,
           actions: [{ label: 'Annuler', value: false }, { label: 'Utiliser', value: true, cls: 'primary' }],
           validate: (v, w) => {
@@ -838,30 +1237,44 @@ async function gridView(kind, id) {
         read();
         const v = await form('Enregistrer comme grille modèle', [{ name: 'name', label: 'Nom de la grille', value: owner.title, required: true }]);
         if (!v) return;
-        await db.put('grids', { name: v.name, grid: JSON.parse(JSON.stringify({ ...grid, criteria: grid.criteria.filter(c => c.label.trim()) })) });
+        await db.put('grids', { name: v.name, subject: owner.subject || '', grid: JSON.parse(JSON.stringify({ ...grid, criteria: grid.criteria.filter(c => c.label.trim()) })) });
         toast('Grille modèle enregistrée', 'success');
       };
   };
   render();
 }
 
+function groupBySubject(grids) {
+  const by = {};
+  for (const g of grids) (by[g.subject || 'Sans matière'] = by[g.subject || 'Sans matière'] || []).push(g);
+  return Object.entries(by).sort(([x], [y]) => (x === 'Sans matière') - (y === 'Sans matière') || x.localeCompare(y, 'fr'));
+}
+
 async function gridsView() {
   const grids = (await db.all('grids')).sort(db.sortByName);
+  const groups = groupBySubject(grids);
+  const item = g => `<div class="list-item"><a class="li-main" href="#/grille/modele/${g.id}"><b>${esc(g.name)}</b><small>${g.grid.criteria.length} critères · ${g.grid.mode === 'note' ? 'notation' + (g.grid.scaleTo ? ' sur ' + g.grid.scaleTo : '') : 'acquis / non acquis'}</small></a>
+          <button class="icon-btn" data-del="${g.id}">🗑</button></div>`;
   view.innerHTML = `<div class="page-wrap">
     <div class="page-head"><h1>Mes grilles modèles</h1><a class="btn primary" href="#/grille/modele/new">+ Grille</a></div>
-    <p class="muted">Des grilles réutilisables : dans un devoir, « Utiliser une grille modèle » en fait une copie que vous pouvez ensuite adapter.</p>
-    <div class="list">${
-      grids
-        .map(
-          g => `<div class="list-item"><a class="li-main" href="#/grille/modele/${g.id}"><b>${esc(g.name)}</b><small>${g.grid.criteria.length} critères · ${g.grid.mode === 'note' ? 'notation' + (g.grid.scaleTo ? ' sur ' + g.grid.scaleTo : '') : 'acquis / non acquis'}</small></a>
-          <button class="icon-btn" data-del="${g.id}">🗑</button></div>`
-        )
+    <p class="muted">Des grilles réutilisables, rangées par matière. Dans une évaluation, « Utiliser une grille modèle » en fait une copie que vous pouvez ensuite adapter.</p>
+    ${groups.length > 1 ? `<div class="chips">${groups.map(([subj, list]) => `<a class="chip" href="#subj-${encodeURIComponent(subj)}" data-jump="${esc(subj)}">${esc(subj)} <small>${list.length}</small></a>`).join('')}</div>` : ''}
+    ${
+      groups
+        .map(([subj, list]) => `<section class="subject" id="subj-${esc(encodeURIComponent(subj))}"><h2>📚 ${esc(subj)} <small>(${list.length})</small></h2><div class="list">${list.map(item).join('')}</div></section>`)
         .join('') || '<div class="empty"><div class="empty-icon">📋</div><p>Aucune grille modèle pour l’instant.</p></div>'
-    }</div></div>`;
+    }</div>`;
+  $$('[data-jump]').forEach(
+    c =>
+      (c.onclick = e => {
+        e.preventDefault();
+        document.getElementById('subj-' + encodeURIComponent(c.dataset.jump)).scrollIntoView({ behavior: 'smooth' });
+      })
+  );
   $$('[data-del]').forEach(
     b =>
       (b.onclick = async () => {
-        if (await confirmBox('Supprimer la grille', 'Supprimer cette grille modèle ? Les devoirs qui l’utilisent gardent leur propre copie.', 'Supprimer', true)) {
+        if (await confirmBox('Supprimer la grille', 'Supprimer cette grille modèle ? Les évaluations qui l’utilisent gardent leur propre copie.', 'Supprimer', true)) {
           await db.del('grids', b.dataset.del);
           router();
         }

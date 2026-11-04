@@ -127,6 +127,18 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
     const lw = 110;
     page.drawImage(logo, { x: W - M - lw, y: H - M - (lw * logo.height) / logo.width + 14, width: lw, height: (lw * logo.height) / logo.width });
   } catch {}
+  // logo de l'école en haut à gauche, s'il a été ajouté
+  let indent = 0;
+  try {
+    const school = cls ? await (await import('./db.js')).get('schools', cls.schoolId) : null;
+    if (school && school.logo) {
+      const img = await doc.embedPng(school.logo);
+      const h = 44,
+        w = (h * img.width) / img.height;
+      page.drawImage(img, { x: M, y: H - M - h + 4, width: w, height: h });
+      indent = w + 12;
+    }
+  } catch {}
 
   const ensure = h => {
     if (y - h < M) {
@@ -142,11 +154,11 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
     }
   };
 
-  text("Fiche d'évaluation", { f: bold, size: 20, color: accent });
+  text("Fiche d'évaluation", { f: bold, size: 20, color: accent, x: M + indent, maxW: W - 2 * M - indent - 120 });
   y -= 6;
-  text(assignment.title || 'Devoir', { f: bold, size: 14 });
-  text(`${studentName(student)}${cls ? ' · ' + cls.name : ''}`, { size: 12, color: grey });
-  text(`Corrigé le ${fmtDate(copy.correctedAt || Date.now())}${settings.teacherName ? ' par ' + settings.teacherName : ''}`, { size: 10, color: grey });
+  text(assignment.title || 'Devoir', { f: bold, size: 14, x: M + indent, maxW: W - 2 * M - indent - 120 });
+  text(`${studentName(student)}${cls ? ' · ' + cls.name : ''}`, { size: 12, color: grey, x: M + indent });
+  text(`Évalué le ${fmtDate(copy.correctedAt || Date.now())}${settings.teacherName ? ' par ' + settings.teacherName : ''}`, { size: 10, color: grey, x: M + indent });
   y -= 14;
 
   const grid = assignment.grid;

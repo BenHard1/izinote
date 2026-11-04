@@ -73,7 +73,7 @@ export function modal({ title, body = '', actions = [{ label: 'OK', value: true,
     });
     onOpen && onOpen(wrap, close);
     const first = wrap.querySelector('input:not([type=checkbox]):not([type=file]), textarea, select');
-    if (first) setTimeout(() => first.focus(), 50);
+    if (first) setTimeout(() => !wrap.contains(document.activeElement) && first.focus(), 50);
   });
 }
 
@@ -117,8 +117,12 @@ export async function form(title, fields, okLabel = 'Enregistrer') {
       f => `<label class="field"><span>${esc(f.label)}</span>${
         f.type === 'textarea'
           ? `<textarea class="input" name="${f.name}" rows="${f.rows || 4}" placeholder="${esc(f.placeholder || '')}">${esc(f.value || '')}</textarea>`
-          : `<input class="input" name="${f.name}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}" ${f.type === 'email' ? 'inputmode="email" autocapitalize="off"' : ''}>`
-      }</label>`
+          : f.type === 'select'
+          ? `<select class="input" name="${f.name}">${f.options.map(o => `<option value="${esc(o.value)}" ${o.value === f.value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select>`
+          : `<input class="input" name="${f.name}" type="${f.type || 'text'}" value="${esc(f.value ?? '')}" placeholder="${esc(f.placeholder || '')}" ${f.type === 'email' ? 'inputmode="email" autocapitalize="off"' : ''} ${f.datalist ? `list="dl-${f.name}"` : ''}>${
+              f.datalist ? `<datalist id="dl-${f.name}">${f.datalist.map(v => `<option value="${esc(v)}">`).join('')}</datalist>` : ''
+            }`
+      }${f.help ? `<small class="muted">${esc(f.help)}</small>` : ''}</label>`
     )
     .join('');
   const r = await modal({
@@ -150,12 +154,13 @@ export async function form(title, fields, okLabel = 'Enregistrer') {
   return r ? values : null;
 }
 
-export function pickFiles({ accept = 'application/pdf', multiple = false } = {}) {
+export function pickFiles({ accept = 'application/pdf', multiple = false, capture = false } = {}) {
   return new Promise(resolve => {
     const i = document.createElement('input');
     i.type = 'file';
     i.accept = accept;
     i.multiple = multiple;
+    if (capture) i.setAttribute('capture', 'environment');
     i.onchange = () => resolve([...i.files]);
     i.click();
   });
@@ -327,3 +332,67 @@ export function resultText(grid, evaluation) {
   if (!r.lines.length) return '';
   return ['Évaluation :', ...r.lines.map(l => `- ${l.label} : ${l.value}`), r.totalLine].join('\n');
 }
+
+// Note ramenée sur 20 (grilles en points seulement), ou null.
+export function noteOn20(grid, evaluation = {}) {
+  if (!grid || grid.mode !== 'note' || !grid.criteria || !grid.criteria.length) return null;
+  const r = computeResult(grid, evaluation);
+  if (!r.max || !Object.keys(evaluation || {}).some(k => grid.criteria.some(c => c.id === k))) return null;
+  return (r.total / r.max) * 20;
+}
+
+// Valeur affichée dans un tableur : nombre (note) ou texte (acquis).
+export function resultCell(grid, evaluation = {}) {
+  if (!grid || !grid.criteria || !grid.criteria.length) return '';
+  const r = computeResult(grid, evaluation);
+  if (grid.mode === 'note') {
+    if (!Object.keys(evaluation || {}).length) return '';
+    const v = r.scaled != null ? r.scaled : r.total;
+    return Math.round(v * 100) / 100;
+  }
+  return r.short;
+}
+
+export const KINDS = [
+  { value: 'devoir', label: 'Devoir (copie PDF)' },
+  { value: 'projet', label: 'Projet (copie PDF)' },
+  { value: 'oral', label: 'Oral (sans copie)' },
+  { value: 'groupe', label: 'Travail de groupe' },
+];
+export const kindLabel = k => ({ devoir: 'Devoir', projet: 'Projet', oral: 'Oral', groupe: 'Travail de groupe' })[k] || 'Devoir';
+
+export function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    if (document.querySelector(`script[src="${src}"]`)) return resolve();
+    const s = document.createElement('script');
+    s.src = src;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Chargement impossible (connexion internet ?)'));
+    document.head.appendChild(s);
+  });
+}
+
+// Image (fichier ou URL) -> PNG en data URL, réduit à max px.
+export function imageToDataUrl(src, max = 256) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.naturalWidth * k));
+      c.height = Math.max(1, Math.round(img.naturalHeight * k));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      try {
+        resolve(c.toDataURL('image/png'));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    img.onerror = () => reject(new Error("Image introuvable"));
+    img.src = src instanceof Blob ? URL.createObjectURL(src) : src;
+  });
+}
+
+export const dateOf = a => (a.dueDate ? new Date(a.dueDate + 'T12:00:00') : new Date(a.createdAt || Date.now()));
+export const shortDate = d => d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
