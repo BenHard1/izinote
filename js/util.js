@@ -36,6 +36,22 @@ export function toast(msg, type = '') {
   }, type === 'error' ? 5000 : 2600);
 }
 
+// ---------- Écran d'attente (bonhomme animé) ----------
+// const b = busy('Conversion…'); b.set('Page 2…'); b.done();
+export function busy(msg = 'Un instant…') {
+  const w = document.createElement('div');
+  w.className = 'busy-wrap';
+  w.innerHTML = `<div class="busy"><img src="assets/chargement.gif" alt=""><p></p></div>`;
+  const p = w.querySelector('p');
+  p.textContent = msg;
+  document.body.appendChild(w);
+  requestAnimationFrame(() => w.classList.add('show'));
+  return {
+    set: m => (p.textContent = m),
+    done: () => w.remove(),
+  };
+}
+
 // ---------- Fenêtre modale ----------
 // actions: [{label, value, cls}] ; renvoie la valeur du bouton cliqué (ou null si fermé).
 // onOpen(root, close) permet de brancher des événements ; validate(value, root) peut empêcher la fermeture.

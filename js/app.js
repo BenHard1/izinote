@@ -3,6 +3,7 @@ import {
   esc, $, $$, modal, form, toast, confirmBox, confirmTyped, pickFiles, download, normalize, studentName,
   computeResult, resultText, newGrid, fmtNum, parseNum, fmtDate, DEFAULT_LEVELS,
   KINDS, kindLabel, imageToDataUrl, dateOf, shortDate,
+  busy,
 } from './util.js';
 import { mountEditor } from './editor.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
@@ -54,12 +55,27 @@ async function router() {
         view.innerHTML = `<div class="page-wrap"><p class="error">Erreur : ${esc(e.message)}</p><a class="btn" href="#/">Retour à l'accueil</a></div>`;
       }
       window.scrollTo(0, 0);
+      hideSplash();
       return;
     }
   }
   location.hash = '#/';
 }
 window.addEventListener('hashchange', router);
+
+// Écran de démarrage : on le garde au moins un tour d'animation (~1,6 s) puis il s'efface.
+const splashStart = performance.now();
+let splashGone = false;
+function hideSplash() {
+  if (splashGone) return;
+  splashGone = true;
+  const el = document.getElementById('splash');
+  if (!el) return;
+  setTimeout(() => {
+    el.classList.add('hide');
+    setTimeout(() => el.remove(), 450);
+  }, Math.max(0, 1600 - (performance.now() - splashStart)));
+}
 const go = h => (location.hash = h);
 
 function crumbs(items) {
@@ -578,7 +594,10 @@ async function studentView(id, semParam) {
     }
   </div>`;
   $('#edit').onclick = () => editStudent(s, s.classId);
-  $('#pdf').onclick = () => studentRecapPdf(s, semId, semName).catch(e => toast(e.message, 'error'));
+  $('#pdf').onclick = () => {
+    const b = busy('Création du récap PDF…');
+    studentRecapPdf(s, semId, semName).catch(e => toast(e.message, 'error')).finally(b.done);
+  };
 }
 
 function statusLabel(c, a) {
@@ -774,20 +793,17 @@ async function attachPdf(copy, files, append = false) {
     const err = checkSupported(f);
     if (err) throw new Error(err);
   }
-  const prog = document.createElement('div');
-  prog.className = 'toast show';
-  prog.textContent = 'Préparation du document…';
-  document.body.appendChild(prog);
+  const b = busy('Préparation du document…');
   try {
     const keep = append && copy.pdf instanceof Blob;
-    copy.pdf = await filesToPdfBlob(files, keep ? copy.pdf : null, m => (prog.textContent = m));
+    copy.pdf = await filesToPdfBlob(files, keep ? copy.pdf : null, b.set);
     const names = files.map(f => f.name);
     copy.fileName = keep && copy.fileName ? [copy.fileName, ...names].join(' + ') : names.join(' + ');
     if (!keep) copy.annotations = {};
     copy.sentAt = null;
     await db.put('copies', copy);
   } finally {
-    prog.remove();
+    b.done();
   }
 }
 
@@ -884,8 +900,10 @@ async function bulkImport(a, students, copies) {
 async function downloadAll(a, cls, students, copies) {
   const settings = await db.getSettings();
   const list = students.map(s => ({ s, c: copies.find(c => c.studentId === s.id) })).filter(x => x.c && x.c.status === 'done');
-  toast(`Préparation de ${list.length} PDF…`);
+  const b = busy(`Préparation de ${list.length} PDF…`);
+  let n = 0;
   for (const { s, c } of list) {
+    b.set(`PDF ${++n} / ${list.length} : ${studentName(s)}`);
     try {
       const bytes = await buildCorrectedPdf({ copy: c, student: s, assignment: a, cls, settings });
       download(new Blob([bytes], { type: 'application/pdf' }), correctedFileName(s, a));
@@ -894,6 +912,7 @@ async function downloadAll(a, cls, students, copies) {
       toast(`${studentName(s)} : ${e.message}`, 'error');
     }
   }
+  b.done();
 }
 
 // ---------------- Envoi des corrections par Gmail ----------------
@@ -1154,19 +1173,16 @@ async function gridView(kind, id) {
       read();
       const files = await pickFiles({ accept: capture ? 'image/*' : 'application/pdf,image/*', capture });
       if (!files.length) return;
-      const prog = document.createElement('div');
-      prog.className = 'toast show';
-      prog.textContent = 'Lecture de la grille…';
-      document.body.appendChild(prog);
+      const prog = busy('Lecture de la grille…');
       let res;
       try {
-        res = await readGridFile(files[0], m => (prog.textContent = m));
+        res = await readGridFile(files[0], prog.set);
       } catch (e) {
         console.error(e);
-        prog.remove();
+        prog.done();
         return toast('Lecture impossible : ' + e.message, 'error');
       }
-      prog.remove();
+      prog.done();
       if (!res.criteria.length) return toast('Aucun critère reconnu. Essayez une photo plus nette et bien droite, ou saisissez la grille à la main.', 'error');
       let lines = null,
         mode = res.mode;
