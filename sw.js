@@ -1,5 +1,5 @@
 // Service worker : l'appli fonctionne même sans connexion (sauf dictée et envoi des mails).
-const CACHE = 'izinote-v8';
+const CACHE = 'izinote-v9';
 const ASSETS = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/util.js', 'js/editor.js', 'js/pdfexport.js', 'js/gmail.js', 'js/reports.js', 'js/gridimport.js', 'js/convert.js', 'js/stamps.js', 'js/schedule.js', 'js/relayscript.js',
@@ -21,7 +21,8 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin) return;
   e.respondWith(
-    fetch(e.request)
+    // no-cache : on revalide auprès du serveur au lieu d'utiliser le cache HTTP (10 min sur GitHub Pages)
+    fetch(e.request, { cache: 'no-cache' })
       .then(res => {
         if (res.ok) {
           const copy = res.clone();

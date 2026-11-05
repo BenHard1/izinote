@@ -1523,7 +1523,17 @@ async function settingsView() {
 
 // ---------------- Démarrage ----------------
 if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
-if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  // Nouvelle version installée : on recharge une fois pour l'utiliser tout de suite.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+}
 router();
 sched.onScheduleChange(() => /^#\/(devoir|classe)\//.test(location.hash) && router());
 sched.startScheduler();
