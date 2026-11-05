@@ -71,10 +71,12 @@ function bytesToB64(bytes) {
   return btoa(bin);
 }
 
-export function buildMime({ to, subject, body, attachment }) {
+export function buildMime({ to, bcc, subject, body, attachment, attachments }) {
   const boundary = 'part_' + Math.random().toString(36).slice(2);
+  const files = attachments || (attachment ? [attachment] : []);
   const lines = [
-    `To: ${to}`,
+    ...(to ? [`To: ${to}`] : []),
+    ...(bcc ? [`Bcc: ${bcc}`] : []),
     `Subject: ${encWord(subject)}`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
@@ -85,14 +87,14 @@ export function buildMime({ to, subject, body, attachment }) {
     '',
     wrap76(b64(body)),
   ];
-  if (attachment) {
+  for (const f of files) {
     lines.push(
       `--${boundary}`,
-      `Content-Type: application/pdf; name="${encWord(attachment.name)}"`,
-      `Content-Disposition: attachment; filename="${encWord(attachment.name)}"`,
+      `Content-Type: ${f.type || 'application/pdf'}; name="${encWord(f.name)}"`,
+      `Content-Disposition: attachment; filename="${encWord(f.name)}"`,
       'Content-Transfer-Encoding: base64',
       '',
-      wrap76(bytesToB64(attachment.bytes))
+      wrap76(bytesToB64(f.bytes))
     );
   }
   lines.push(`--${boundary}--`, '');

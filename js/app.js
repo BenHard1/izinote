@@ -9,6 +9,7 @@ import { mountEditor } from './editor.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
 import * as gmail from './gmail.js';
 import * as sched from './schedule.js';
+import { distributeDialog, mailingsSection } from './distribute.js';
 import { relayScript } from './relayscript.js';
 import { classData, average, semesterOf, exportClassXlsx, studentRecapPdf } from './reports.js';
 import { readGridFile } from './gridimport.js';
@@ -371,6 +372,7 @@ async function classView(id) {
     ${crumbs(await chain({ cls }))}
     <div class="page-head"><h1>${esc(cls.name)}${cls.year ? ` <small>${esc(cls.year)}</small>` : ''}</h1>
       <div class="row">
+        <button class="btn" id="dist">✉ Envoyer un document</button>
         <button class="btn" id="xls">📊 Exporter les notes</button>
         ${menuButton([
           { label: 'Renommer la classe', act: 'rename' },
@@ -408,8 +410,14 @@ async function classView(id) {
               .join('')}</div>`
           : `<p class="muted">Aucun étudiant. Ajoutez-les un par un ou collez une liste.</p>`
       }
+      ${mailingsSection(cls)}
     </section>
   </div>`;
+
+  $('#dist').onclick = () => {
+    if (!students.some(s => s.email)) return toast('Aucun élève de cette classe n’a d’adresse e-mail.', 'error');
+    distributeDialog(cls, students, () => router());
+  };
 
   $('#addA').onclick = async () => {
     const subjects = [...new Set([...all.map(a => a.subject), ...(await db.all('grids')).map(g => g.subject)].filter(Boolean))].sort();

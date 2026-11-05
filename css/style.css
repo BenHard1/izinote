@@ -398,3 +398,9 @@ section.subject { margin: 18px 0; }
 .linkbtn { background: none; border: none; padding: 0; color: var(--primary); text-decoration: underline; font: inherit; cursor: pointer; }
 .sched-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 800; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center; background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.3); font-weight: 600; max-width: calc(100vw - 32px); }
 .mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.8rem; }
+
+/* ---------- Envoi de documents à la classe ---------- */
+.file-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 8px; }
+.file-chip { display: inline-flex; align-items: center; gap: 6px; }
+.file-chip small { color: var(--muted); }
+#dSize.warn { color: var(--warn); font-weight: 600; }
