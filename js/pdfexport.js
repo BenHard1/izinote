@@ -71,6 +71,21 @@ export async function buildCorrectedPdf({ copy, student, assignment, cls, settin
     // ce qui gère les pages tournées et les marges de cadrage.
     const pj = await window.pdfjsLib.getDocument({ data: bytes.slice() }).promise;
     const annots = copy.annotations || {};
+    // tampons image utilisés dans cette copie
+    const images = {};
+    for (const items of Object.values(annots))
+      for (const it of items || [])
+        if (it.t === 'stamp' && it.k === 'img' && !(it.img in images)) {
+          const def = ((settings && settings.imageStamps) || []).find(x => x.id === it.img);
+          images[it.img] = null;
+          if (def) {
+            try {
+              images[it.img] = await doc.embedPng(def.src);
+            } catch (e) {
+              console.warn('Tampon image illisible', e);
+            }
+          }
+        }
     for (const key of Object.keys(annots)) {
       const i = +key;
       const items = annots[key];
@@ -92,7 +107,7 @@ export async function buildCorrectedPdf({ copy, student, assignment, cls, settin
             borderLineCap: LineCapStyle.Round,
           });
         } else if (it.t === 'stamp') {
-          drawStampPdf(page, it, { toPdf, vpW: vp.width, vpH: vp.height, rgbColor: hexToRgb(it.c), bold: boldFont, safe: safeBold });
+          drawStampPdf(page, it, { toPdf, vpW: vp.width, vpH: vp.height, rgbColor: hexToRgb(it.c), bold: boldFont, safe: safeBold, images });
         } else if (it.t === 'text' && it.text) {
           const size = it.s * vp.width;
           const lines = String(it.text).split('\n');

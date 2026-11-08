@@ -1,7 +1,7 @@
 // Écran de correction : affichage du PDF, annotation au stylet, grille, commentaire (écrit ou dicté).
-import { esc, $, $$, modal, toast, attachDictation, speechSupported, computeResult, fmtNum, parseNum, studentName, download } from './util.js';
+import { esc, $, $$, modal, toast, attachDictation, speechSupported, computeResult, fmtNum, parseNum, studentName, download, pickFiles, imageToDataUrl } from './util.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
-import { BUILTIN_STAMPS, STAMP_SIZES, drawStampCanvas, stampBoxCss } from './stamps.js';
+import { BUILTIN_STAMPS, STAMP_SIZES, IMAGE_SCALE, drawStampCanvas, stampBoxCss, preloadImage } from './stamps.js';
 
 const COLORS = ['#d62828', '#1f8a3a', '#1d4ed8', '#111111'];
 const HL_COLORS = ['#ffd60a', '#7ee081', '#7cc6fe', '#ff9ecd'];
@@ -109,7 +109,11 @@ export async function mountEditor(root, ctx) {
   const life = new AbortController();
   const customColors = () => (settings.customColors = settings.customColors || []);
   const customStamps = () => (settings.customStamps = settings.customStamps || []);
-  const sameStamp = (a, b) => a && b && a.k === b.k && (a.k !== 'text' || a.text === b.text);
+  // tampons image : on garde aussi ceux qu'on retire de la liste (deleted), pour les copies déjà tamponnées
+  const imageStamps = () => (settings.imageStamps = settings.imageStamps || []);
+  const imgSrc = id => (imageStamps().find(x => x.id === id) || {}).src;
+  const sameStamp = (a, b) => a && b && a.k === b.k && (a.k === 'img' ? a.img === b.img : a.k !== 'text' || a.text === b.text);
+  await Promise.all(imageStamps().map(x => preloadImage(x.src)));
 
   function renderToolbar() {
     $$('.tool[data-tool]', root).forEach(b => b.classList.toggle('on', b.dataset.tool === st.tool));
@@ -125,16 +129,21 @@ export async function mountEditor(root, ctx) {
     $('.widths', root).innerHTML = sizes
       .map((w, i) => `<button class="tool wbtn ${i === curSize ? 'on' : ''}" data-w="${i}" title="${w.label}"><span style="--d:${w.d || 4 + i * 4}px"></span></button>`)
       .join('');
-    const stamps = [...BUILTIN_STAMPS, ...customStamps().map(text => ({ k: 'text', text }))];
+    const stamps = [
+      ...BUILTIN_STAMPS,
+      ...customStamps().map(text => ({ k: 'text', text })),
+      ...imageStamps().filter(x => !x.deleted).map(x => ({ k: 'img', img: x.id, ar: x.ar })),
+    ];
     $('.stamps', root).innerHTML = isStamp
       ? stamps
           .map(
             (sp, i) =>
-              `<button class="stamp-btn ${sameStamp(sp, st.stamp) ? 'on' : ''}" data-stamp="${i}" style="--c:${st.color}" title="Tampon">${
-                sp.k === 'check' ? '✓' : sp.k === 'cross' ? '✗' : sp.k === 'star' ? '★' : esc(sp.text)
+              `<button class="stamp-btn ${sp.k === 'img' ? 'img' : ''} ${sameStamp(sp, st.stamp) ? 'on' : ''}" data-stamp="${i}" style="--c:${st.color}" title="Tampon">${
+                sp.k === 'check' ? '✓' : sp.k === 'cross' ? '✗' : sp.k === 'star' ? '★' : sp.k === 'img' ? `<img src="${esc(imgSrc(sp.img))}" alt="">` : esc(sp.text)
               }</button>`
           )
-          .join('') + `<button class="stamp-btn add" data-act="stamps" title="Créer ou supprimer des tampons">＋ Tampon</button>`
+          .join('') +
+        `<button class="stamp-btn add" data-act="stamps" title="Créer ou supprimer des tampons (texte ou image)">＋ Tampon</button>`
       : '';
     $('.stamps', root).style.display = isStamp ? '' : 'none';
     $('.colors', root).style.display = st.tool === 'eraser' || st.tool === 'hand' ? 'none' : '';
@@ -144,6 +153,7 @@ export async function mountEditor(root, ctx) {
     $('[data-act=redo]', root).disabled = !redo.length;
     scroll.dataset.tool = st.tool;
     renderToolbar.stamps = stamps;
+    if (st.tool !== 'stamp') hideStampBar();
   }
 
   async function manageColors() {
@@ -197,12 +207,19 @@ export async function mountEditor(root, ctx) {
         <div class="row"><input class="input" id="stext" maxlength="40" placeholder="Texte du tampon"><span></span></div>
         <div class="custom-list">${customStamps()
           .map((t, i) => `<span class="custom-item stamp-chip">${esc(t)}<button class="icon-btn" data-dels="${i}" title="Supprimer">✕</button></span>`)
-          .join('') || '<p class="muted small">Aucun tampon personnel pour l’instant.</p>'}</div>`,
+          .join('') || '<p class="muted small">Aucun tampon texte personnel pour l’instant.</p>'}</div>
+        <h3 style="margin-top:18px">Tampons image</h3>
+        <p class="muted small">Un logo, une signature, un autocollant… Image PNG (de préférence à fond transparent) ou JPG.</p>
+        <button class="btn" id="simg">🖼 Importer une image</button>
+        <div class="custom-list">${imageStamps()
+          .filter(x => !x.deleted)
+          .map(x => `<span class="custom-item img-chip"><img src="${esc(x.src)}" alt=""><button class="icon-btn" data-deli="${esc(x.id)}" title="Supprimer">✕</button></span>`)
+          .join('')}</div>`,
       actions: [
         { label: 'Fermer', value: null },
         { label: 'Créer le tampon', value: 'add', cls: 'primary' },
       ],
-      onOpen: (w, close) =>
+      onOpen: (w, close) => {
         $$('[data-dels]', w).forEach(
           b =>
             (b.onclick = async () => {
@@ -210,7 +227,36 @@ export async function mountEditor(root, ctx) {
               await ctx.saveSettings(settings);
               close('deleted');
             })
-        ),
+        );
+        $$('[data-deli]', w).forEach(
+          b =>
+            (b.onclick = async () => {
+              const x = imageStamps().find(y => y.id === b.dataset.deli);
+              if (x) x.deleted = true; // les copies déjà tamponnées gardent l'image
+              await ctx.saveSettings(settings);
+              close('deleted');
+            })
+        );
+        $('#simg', w).onclick = async () => {
+          const [f] = await pickFiles({ accept: 'image/*' });
+          if (!f) return;
+          try {
+            const src = await imageToDataUrl(f, 600);
+            const img = await preloadImage(src);
+            if (!img) throw new Error('image illisible');
+            const def = { id: 'i' + Date.now().toString(36), src, ar: img.naturalWidth / img.naturalHeight };
+            imageStamps().push(def);
+            await ctx.saveSettings(settings);
+            st.stamp = prefs.stamp = { k: 'img', img: def.id, ar: def.ar };
+            st.tool = prefs.tool = 'stamp';
+            savePrefs();
+            toast('Tampon image ajouté : touchez la copie pour le poser.', 'success');
+            close('image');
+          } catch (e) {
+            toast('Impossible de lire cette image (' + e.message + ').', 'error');
+          }
+        };
+      },
       validate: (v, w) => {
         text = $('#stext', w).value.trim();
         if (!text) toast('Écrivez le texte du tampon.', 'error');
@@ -298,6 +344,7 @@ export async function mountEditor(root, ctx) {
     redo = [];
   }
   function doUndo() {
+    hideStampBar();
     if (!undo.length) return;
     redo.push(snapshot());
     copy.annotations = JSON.parse(undo.pop());
@@ -305,6 +352,7 @@ export async function mountEditor(root, ctx) {
     changed();
   }
   function doRedo() {
+    hideStampBar();
     if (!redo.length) return;
     undo.push(snapshot());
     copy.annotations = JSON.parse(redo.pop());
@@ -372,7 +420,53 @@ export async function mountEditor(root, ctx) {
       p.div.style.width = w + 'px';
       p.div.style.height = h + 'px';
     }
+    if (stampSel) placeStampBar();
     scheduleRender();
+  }
+
+  // ---------- Tampon sélectionné : agrandir / réduire / supprimer ----------
+  let stampSel = null;
+  const stampOutline = document.createElement('div');
+  stampOutline.className = 'stamp-sel';
+  const stampBar = document.createElement('div');
+  stampBar.className = 'stamp-bar';
+  stampBar.innerHTML = `<button data-sb="smaller" title="Réduire">−</button><button data-sb="bigger" title="Agrandir">+</button><button data-sb="delete" title="Supprimer ce tampon">🗑</button><button data-sb="ok" title="Terminé">✓</button>`;
+  // les touches sur la barre ne doivent ni dessiner ni faire défiler la copie
+  ['pointerdown', 'pointerup', 'pointermove'].forEach(t => stampBar.addEventListener(t, e => e.stopPropagation()));
+  stampBar.addEventListener('click', e => {
+    const b = e.target.closest('[data-sb]');
+    if (!b || !stampSel) return;
+    const { p, it } = stampSel;
+    const act = b.dataset.sb;
+    if (act === 'ok') return hideStampBar();
+    pushHistory();
+    if (act === 'delete') {
+      copy.annotations[p.i] = itemsOf(p).filter(x => x !== it);
+      hideStampBar();
+    } else {
+      const k = act === 'bigger' ? 1.2 : 1 / 1.2;
+      it.s = Math.min(0.9, Math.max(0.01, it.s * k));
+      placeStampBar();
+    }
+    redrawCache(p);
+    changed();
+  });
+  function placeStampBar() {
+    const { p, it } = stampSel;
+    const b = stampBoxCss(it, p.cssW, p.cssH, p.cache.getContext('2d'));
+    Object.assign(stampOutline.style, { left: b.x - 4 + 'px', top: b.y - 4 + 'px', width: b.w + 8 + 'px', height: b.h + 8 + 'px' });
+    const below = b.y + b.h + 60 < p.cssH;
+    Object.assign(stampBar.style, { left: Math.min(Math.max(b.x + b.w / 2, 110), p.cssW - 110) + 'px', top: (below ? b.y + b.h + 10 : b.y - 58) + 'px' });
+    if (stampBar.parentNode !== p.div) p.div.append(stampOutline, stampBar);
+  }
+  function showStampBar(p, it) {
+    stampSel = { p, it };
+    placeStampBar();
+  }
+  function hideStampBar() {
+    stampSel = null;
+    stampOutline.remove();
+    stampBar.remove();
   }
   let renderTimer = null;
   function scheduleRender(delay = 120) {
@@ -446,7 +540,7 @@ export async function mountEditor(root, ctx) {
       g.stroke();
       g.restore();
     } else if (it.t === 'stamp') {
-      drawStampCanvas(g, it, W, H);
+      drawStampCanvas(g, it, W, H, imgSrc);
     } else if (it.t === 'text') {
       const size = it.s * W;
       g.save();
@@ -537,6 +631,7 @@ export async function mountEditor(root, ctx) {
       return;
     }
     if (drawing) return;
+    hideStampBar();
     const hit = pageAt(e.clientX, e.clientY);
     if (!hit) {
       // hors page : on fait défiler
@@ -626,10 +721,27 @@ export async function mountEditor(root, ctx) {
     } else if (d.text && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 12 && e.type !== 'pointercancel') {
       textAt(d.p, d.text[0], d.text[1]);
     } else if (d.stampAt && Math.hypot(e.clientX - d.sx, e.clientY - d.sy) < 16 && e.type !== 'pointercancel') {
+      // toucher un tampon déjà posé le sélectionne (pour l'agrandir, le réduire ou le supprimer)
+      const ex = e.clientX - d.r.left,
+        ey = e.clientY - d.r.top;
+      const g = d.p.cache.getContext('2d');
+      const touched = itemsOf(d.p)
+        .filter(it => it.t === 'stamp')
+        .reverse()
+        .find(it => {
+          const b = stampBoxCss(it, d.r.width, d.r.height, g);
+          return ex > b.x - 4 && ex < b.x + b.w + 4 && ey > b.y - 4 && ey < b.y + b.h + 4;
+        });
+      if (touched) return showStampBar(d.p, touched);
+      const sp = st.stamp;
+      if (sp.k === 'img' && !imgSrc(sp.img)) return toast('Ce tampon image a été supprimé.', 'error');
       pushHistory();
-      itemsOf(d.p).push({ t: 'stamp', k: st.stamp.k, text: st.stamp.text || '', c: st.color, s: STAMP_SIZES[st.stampSize].s, x: d.stampAt[0], y: d.stampAt[1] });
+      const item = { t: 'stamp', k: sp.k, text: sp.text || '', c: st.color, s: STAMP_SIZES[st.stampSize].s * (sp.k === 'img' ? IMAGE_SCALE : 1), x: d.stampAt[0], y: d.stampAt[1] };
+      if (sp.k === 'img') Object.assign(item, { img: sp.img, ar: sp.ar });
+      itemsOf(d.p).push(item);
       redrawCache(d.p);
       changed();
+      showStampBar(d.p, item);
     }
   }
   scroll.addEventListener('pointerup', endPointer);
