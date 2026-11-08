@@ -473,17 +473,46 @@ export async function mountEditor(root, ctx) {
     clearTimeout(renderTimer);
     renderTimer = setTimeout(renderAll, delay);
   }
+  // Mémoire : seules les pages visibles (et leurs voisines) gardent leurs images. Sur une copie longue,
+  // garder toutes les pages en haute définition dépassait la mémoire de la tablette et faisait planter l'appli.
+  function nearView(p) {
+    const r = p.div.getBoundingClientRect();
+    const v = scroll.getBoundingClientRect();
+    const margin = v.height;
+    return r.bottom > v.top - margin && r.top < v.bottom + margin;
+  }
+  function releasePage(p) {
+    if (!p.renderedW) return;
+    if (p.task) {
+      try {
+        p.task.cancel();
+      } catch {}
+      p.task = null;
+    }
+    for (const c of [p.pdfC, p.inkC, p.cache]) c.width = c.height = 0;
+    p.renderedW = 0;
+  }
+  let rendering = false;
   async function renderAll() {
-    for (const p of pages) {
-      if (destroyed) return;
-      await renderPage(p);
+    if (rendering) return scheduleRender(150);
+    rendering = true;
+    try {
+      const near = pages.filter(nearView);
+      for (const p of pages) if (!near.includes(p) && !(drawing && drawing.p === p)) releasePage(p);
+      for (const p of near) {
+        if (destroyed) return;
+        await renderPage(p);
+      }
+    } finally {
+      rendering = false;
     }
   }
   async function renderPage(p) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     let pxW = Math.round(p.cssW * dpr);
-    const maxPx = 4096;
-    if (pxW > maxPx) pxW = maxPx;
+    // au plus ~6 millions de pixels par image (zoom fort : un peu moins net, mais pas de plantage)
+    const maxW = Math.floor(Math.sqrt(6e6 * (p.vp1.width / p.vp1.height)));
+    if (pxW > maxW) pxW = maxW;
     if (p.renderedW === pxW) return;
     const scale = pxW / p.vp1.width;
     const vp = p.pg.getViewport({ scale });
@@ -507,6 +536,7 @@ export async function mountEditor(root, ctx) {
     p.pdfC.width = pxW;
     p.pdfC.height = pxH;
     p.pdfC.getContext('2d').drawImage(off, 0, 0);
+    off.width = off.height = 0; // libère tout de suite l'image intermédiaire
     p.inkC.width = p.cache.width = pxW;
     p.inkC.height = p.cache.height = pxH;
     p.renderedW = pxW;
@@ -573,6 +603,7 @@ export async function mountEditor(root, ctx) {
     paintInk(p);
   }
   function paintInk(p, live) {
+    if (!p.renderedW) return;
     const g = p.inkC.getContext('2d');
     g.clearRect(0, 0, p.inkC.width, p.inkC.height);
     g.drawImage(p.cache, 0, 0);
@@ -1052,6 +1083,7 @@ export async function mountEditor(root, ctx) {
     if (!pinch) relayout();
   });
   ro.observe(scroll);
+  scroll.addEventListener('scroll', () => scheduleRender(150), { passive: true });
 
   const onKey = e => {
     if (e.target.closest && e.target.closest('input, textarea')) return;
