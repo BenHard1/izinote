@@ -1,6 +1,7 @@
-// Stockage local (IndexedDB) : tout reste sur la tablette.
+// Stockage local (IndexedDB). Si la synchronisation est activée (sync.js), les données sont aussi
+// copiées dans le Google Drive du Gmail dédié pour être retrouvées sur les autres appareils.
 const DB_NAME = 'correction-db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 export const STORES = ['schools', 'classes', 'students', 'assignments', 'copies', 'grids', 'settings'];
 
 let dbPromise = null;
@@ -23,6 +24,8 @@ function open() {
       mk('copies', ['assignmentId', 'studentId']);
       mk('grids');
       mk('settings');
+      // traces des suppressions, pour que la synchronisation les reporte sur les autres appareils
+      mk('tombstones');
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -56,17 +59,70 @@ export async function all(name) {
 export async function by(name, index, value) {
   return wrap((await store(name)).index(index).getAll(value));
 }
+// Prévient la synchronisation qu'une donnée a changé sur cet appareil.
+const listeners = new Set();
+export const onChange = fn => listeners.add(fn);
+const changed = name => listeners.forEach(fn => {
+  try {
+    fn(name);
+  } catch (e) {
+    console.error(e);
+  }
+});
+
+// Version du PDF d'une copie : change quand le PDF est remplacé (sert à la synchronisation).
+function stampPdf(name, obj) {
+  if (name !== 'copies') return;
+  if (obj.pdf instanceof Blob) {
+    if (!obj.pdfRev) obj.pdfRev = uid();
+  } else obj.pdfRev = null;
+}
+
+// Écrit tel quel (sans changer la date de modification) et efface une éventuelle trace de suppression.
+export async function putRaw(name, obj) {
+  stampPdf(name, obj);
+  const db = await open();
+  const tx = db.transaction([name, 'tombstones'], 'readwrite');
+  tx.objectStore(name).put(obj);
+  tx.objectStore('tombstones').delete(name + '/' + obj.id);
+  await txDone(tx);
+  return obj;
+}
 export async function put(name, obj) {
   if (!obj.id) obj.id = uid();
   obj.updatedAt = Date.now();
-  await wrap((await store(name, 'readwrite')).put(obj));
+  await putRaw(name, obj);
+  changed(name);
   return obj;
 }
-export async function del(name, id) {
+function txDone(tx) {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  });
+}
+// Supprime sans laisser de trace (utilisé par la synchronisation).
+export async function delRaw(name, id) {
   return wrap((await store(name, 'readwrite')).delete(id));
 }
+export async function del(name, id) {
+  if (id == null) return;
+  const db = await open();
+  const tx = db.transaction([name, 'tombstones'], 'readwrite');
+  tx.objectStore(name).delete(id);
+  tx.objectStore('tombstones').put({ id: name + '/' + id, store: name, recId: id, deletedAt: Date.now() });
+  await txDone(tx);
+  changed(name);
+}
 export async function clear(name) {
-  return wrap((await store(name, 'readwrite')).clear());
+  const db = await open();
+  const ids = await wrap(db.transaction(name).objectStore(name).getAllKeys());
+  const tx = db.transaction([name, 'tombstones'], 'readwrite');
+  tx.objectStore(name).clear();
+  const now = Date.now();
+  for (const id of ids) tx.objectStore('tombstones').put({ id: name + '/' + id, store: name, recId: id, deletedAt: now });
+  await txDone(tx);
+  changed(name);
 }
 
 export const sortByName = (a, b) => (a.name || '').localeCompare(b.name || '', 'fr', { sensitivity: 'base' });
@@ -147,7 +203,10 @@ export async function importAll(file, { replace = true } = {}) {
     if (replace) await clear(name);
     for (const r of json.data[name] || []) {
       if (r.pdf && r.pdf.__b64) r.pdf = b64ToBlob(r.pdf.__b64);
-      await wrap((await store(name, 'readwrite')).put(r));
+      // la sauvegarde restaurée devient la version la plus récente (pour la synchronisation)
+      r.updatedAt = Date.now();
+      await putRaw(name, r);
     }
   }
+  changed('*');
 }

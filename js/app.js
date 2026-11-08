@@ -14,6 +14,7 @@ import { relayScript } from './relayscript.js';
 import { classData, average, semesterOf, exportClassXlsx, studentRecapPdf } from './reports.js';
 import { readGridFile } from './gridimport.js';
 import { ACCEPT_DOCS, checkSupported, filesToPdfBlob } from './convert.js';
+import * as sync from './sync.js';
 
 window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
 
@@ -783,6 +784,7 @@ async function propagateGroup(a, gc) {
       correctedAt: gc.correctedAt,
       annotations: JSON.parse(JSON.stringify(gc.annotations || {})),
       pdf: gc.pdf || null,
+      pdfRev: gc.pdf ? gc.pdfRev || null : null,
       fileName: gc.fileName || null,
       fromGroup: g.id,
     });
@@ -807,6 +809,7 @@ async function attachPdf(copy, files, append = false) {
   try {
     const keep = append && copy.pdf instanceof Blob;
     copy.pdf = await filesToPdfBlob(files, keep ? copy.pdf : null, b.set);
+    copy.pdfRev = null; // nouveau PDF : il sera renvoyé aux autres appareils
     const names = files.map(f => f.name);
     copy.fileName = keep && copy.fileName ? [copy.fileName, ...names].join(' + ') : names.join(' + ');
     if (!keep) copy.annotations = {};
@@ -1438,6 +1441,18 @@ async function settingsView() {
       <p class="muted small">Le relais garde les mails programmés dans votre Google Drive (dossier « IziNote – envois programmés ») et vérifie toutes les 5 minutes s’il y a des mails à envoyer. Un compte Gmail gratuit peut envoyer environ 100 mails par jour avec ce relais.</p>
     </section>
 
+    <section class="card-sec" id="syncSec">
+      <h2>Synchronisation entre appareils</h2>
+      <p>Retrouvez les mêmes données (classes, copies, corrections, grilles, réglages) sur la tablette et l’ordinateur. Elles sont rangées dans le Google Drive de votre Gmail dédié, dans un dossier caché réservé à IziNote.</p>
+      <ol class="steps">
+        <li>Une seule fois : dans votre projet Google Cloud (celui de la connexion Gmail), activez l’<a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener">API Google Drive</a> (bouton « Activer »).</li>
+        <li>Sur chaque appareil : ouvrez IziNote à la même adresse, collez l’ID client Google ci-dessous, puis cochez la case.</li>
+      </ol>
+      <label class="check"><input type="checkbox" id="syncOn" ${sync.isEnabled() ? 'checked' : ''}> Synchroniser cet appareil</label>
+      <div class="row wrap"><button class="btn" id="syncNow" ${sync.isEnabled() ? '' : 'disabled'}>☁ Synchroniser maintenant</button><span class="muted small" id="syncInfo"></span></div>
+      <p class="muted small">Ensuite, tout se fait seul pendant que l’appli est ouverte. Google demande de reconfirmer la connexion toutes les heures : touchez alors le nuage ☁ en haut de l’écran. Si vous avez travaillé sur deux appareils sans connexion, les modifications sont rassemblées (pour une même copie, la plus récente l’emporte).</p>
+    </section>
+
     <section class="card-sec">
       <h2>Modèle de mail</h2>
       <label class="field"><span>Objet</span><input class="input" id="mailSubject" value="${esc(s.mailSubject)}"></label>
@@ -1449,7 +1464,7 @@ async function settingsView() {
 
     <section class="card-sec">
       <h2>Sauvegarde</h2>
-      <p>Toutes vos données (copies, corrections, classes) sont stockées <b>uniquement sur cette tablette</b>. Faites une sauvegarde régulièrement (par ex. dans Google Drive) : elle permet aussi de passer sur un autre appareil.</p>
+      <p>Vos données (copies, corrections, classes) sont stockées sur cet appareil${sync.isEnabled() ? ' et copiées dans votre Google Drive par la synchronisation' : ''}. Une sauvegarde de temps en temps reste une bonne précaution.</p>
       <p class="muted small">${esc(usage)}${persisted ? ' · stockage protégé ✓' : ''}</p>
       <div class="row wrap"><button class="btn" id="export">⬇ Exporter une sauvegarde</button><button class="btn" id="import">⬆ Restaurer une sauvegarde</button></div>
     </section>
@@ -1510,6 +1525,34 @@ async function settingsView() {
       toast(e.message, 'error');
     }
   };
+  const syncInfo = () => {
+    const t = sync.lastSync();
+    $('#syncInfo').textContent = t ? 'Dernière synchronisation : ' + new Date(t).toLocaleString('fr-FR', { dateStyle: 'short', timeStyle: 'short' }) : '';
+  };
+  syncInfo();
+  const runSync = async on => {
+    try {
+      const n = on === undefined ? await sync.syncNow({ interactive: true }) : await sync.enable(on);
+      if (sync.isEnabled()) toast(n ? `Synchronisé ✓ (${n} élément${n > 1 ? 's' : ''} reçu${n > 1 ? 's' : ''})` : 'Synchronisé ✓', 'success');
+    } catch (e) {
+      toast(e.message, 'error');
+    }
+    syncInfo();
+  };
+  $('#syncOn').onchange = async e => {
+    const on = e.target.checked;
+    if (on) {
+      const st = collect();
+      if (!st.googleClientId) {
+        e.target.checked = false;
+        return toast('Collez d’abord l’ID client Google (section « Connexion Gmail »).', 'error');
+      }
+      await db.saveSettings(st);
+    }
+    $('#syncNow').disabled = !on;
+    await runSync(on);
+  };
+  $('#syncNow').onclick = () => runSync();
   $('#export').onclick = async () => {
     toast('Préparation de la sauvegarde…');
     const blob = await db.exportAll();
@@ -1543,5 +1586,36 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
 }
 router();
+
+// ---------------- Synchronisation ----------------
+const syncBtn = $('#syncBtn');
+const SYNC_TITLES = {
+  ok: 'Synchronisé',
+  pending: 'Modifications en attente d’envoi',
+  busy: 'Synchronisation en cours…',
+  auth: 'Touchez pour synchroniser avec vos autres appareils',
+  error: 'Erreur de synchronisation',
+};
+sync.onStatus(({ state, msg }) => {
+  syncBtn.hidden = state === 'off';
+  syncBtn.dataset.state = state;
+  syncBtn.title = msg || SYNC_TITLES[state] || '';
+});
+syncBtn.onclick = async () => {
+  try {
+    const n = await sync.syncNow({ interactive: true });
+    toast(n ? `Synchronisé ✓ (${n} élément${n > 1 ? 's' : ''} reçu${n > 1 ? 's' : ''})` : 'Synchronisé ✓', 'success');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+};
+// des données sont arrivées d'un autre appareil : on rafraîchit l'écran (sauf pendant une correction)
+sync.onRemoteChanges(() => {
+  if (/^#\/corriger\//.test(location.hash)) return;
+  if (document.querySelector('.modal-wrap')) return;
+  if (/^#\/(grille|reglages)/.test(location.hash) && document.activeElement && document.activeElement.matches('input, textarea')) return;
+  router();
+});
+if (sync.isEnabled()) gmail.loadGis().catch(() => {});
 sched.onScheduleChange(() => /^#\/(devoir|classe)\//.test(location.hash) && router());
 sched.startScheduler();

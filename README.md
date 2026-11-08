@@ -29,9 +29,18 @@ Charte graphique : noir `#141414`, orange `#FF7828`, beige `#F5EDE0` · typograp
 - **Export Excel** : bouton « Exporter les notes » sur la page de la classe. Le fichier contient une ligne par élève : nom, prénom, puis une colonne par évaluation (titre et date) avec la note, et la moyenne. Une 2ᵉ feuille donne les compétences.
 - **Semestres** : menu ⋮ de la classe › « Clôturer … ». La période en cours est archivée (toujours consultable en bas de la page de la classe) et une nouvelle commence.
 - **Fin d'année** : sur la page de la classe, menu ⋮ › « Supprimer la classe ». Cela supprime ses étudiants, devoirs et copies. Pour confirmer, il faut retaper le nom de la classe.
+- **Tablette en portrait** : l'écran de correction s'adapte. La barre d'outils passe sur deux lignes et le panneau d'évaluation se place sous la copie au lieu de la recouvrir.
+- **Synchronisation entre appareils** : Réglages › « Synchronisation entre appareils ». Les données (classes, copies et leurs PDF, corrections, grilles, réglages) sont copiées dans un dossier caché du Google Drive du Gmail dédié. Vous les retrouvez ainsi sur la tablette et sur l'ordinateur. Ensuite, tout se fait seul pendant que l'appli est ouverte. Quand Google demande de reconfirmer la connexion (toutes les heures), le nuage en haut à droite a un point orange : touchez-le.
 - **Sauvegarde** : Réglages › Exporter / Restaurer (un fichier .json à ranger dans Google Drive, par exemple).
 
-Tout est stocké **sur la tablette** (dans le navigateur) : rien n'est envoyé ailleurs, sauf les mails. Pensez donc à exporter une sauvegarde de temps en temps.
+Les données sont stockées dans le navigateur de chaque appareil. Rien n'est envoyé ailleurs, sauf les mails et, si vous l'activez, la synchronisation vers votre propre Google Drive. Pensez à exporter une sauvegarde de temps en temps.
+
+## Synchronisation entre appareils (une fois, 2 minutes)
+
+1. Dans le projet Google Cloud de la connexion Gmail, activez l'**API Google Drive** : <https://console.cloud.google.com/apis/library/drive.googleapis.com>, puis « Activer ».
+2. Sur chaque appareil (tablette, ordinateur) : ouvrez IziNote à la même adresse, collez l'ID client dans Réglages, puis cochez « Synchroniser cet appareil ». Google demande d'autoriser l'accès au Drive : acceptez.
+
+IziNote n'a accès qu'à son propre dossier caché (`appDataFolder`), pas au reste de votre Drive. Si vous travaillez sur deux appareils sans connexion, tout est rassemblé à la synchronisation suivante : pour un même élément, la version modifiée en dernier l'emporte.
 
 ## Mise en ligne (gratuite, avec GitHub Pages)
 
@@ -71,4 +80,5 @@ C'est gratuit : un compte Gmail peut envoyer environ 500 mails par jour.
 - HTML/CSS/JavaScript sans framework ni étape de compilation. Les bibliothèques sont incluses dans `lib/` : [pdf.js](https://mozilla.github.io/pdf.js/) 3.11 (affichage), [pdf-lib](https://pdf-lib.js.org/) 1.17 (PDF corrigés et récaps), [SheetJS](https://sheetjs.com/) 0.18 (export Excel) et [Tesseract.js](https://tesseract.projectnaptha.com/) 5.1 avec le français (lecture des grilles en photo).
 - Données dans IndexedDB ; `sw.js` met l'appli en cache pour qu'elle fonctionne hors ligne.
 - Envoi par l'API Gmail (`gmail.send`) avec Google Identity Services, directement depuis le navigateur, sans serveur.
+- Synchronisation (`js/sync.js`) par l'API Google Drive (`drive.appdata`) : un fichier `izinote-donnees.json` et un fichier par PDF de copie. Les suppressions sont gardées dans le magasin IndexedDB `tombstones` pour être reportées sur les autres appareils.
 - Pour tester en local : `python3 -m http.server` dans ce dossier, puis <http://localhost:8000>.

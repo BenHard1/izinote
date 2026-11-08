@@ -1,7 +1,9 @@
 // Envoi des mails par l'API Gmail, depuis le compte Gmail dédié (gratuit).
 // L'autorisation se fait via Google Identity Services : une fenêtre Google s'ouvre, on se connecte, c'est tout.
 
-const SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+// gmail.send : envoyer les mails ; drive.appdata : dossier caché de l'appli dans le Drive (synchronisation).
+// L'appli ne voit que ses propres fichiers, pas le reste du Drive.
+const SCOPE = 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.appdata';
 let gisLoaded = null;
 let token = null;
 let tokenExpiry = 0;
@@ -27,6 +29,11 @@ export function loadGis() {
 }
 
 export const hasValidToken = () => token && Date.now() < tokenExpiry - 60000;
+export const forgetToken = () => {
+  token = null;
+};
+let grantedScope = '';
+export const hasScope = s => grantedScope.split(' ').includes(s);
 
 // À appeler directement dans un clic (sinon la fenêtre Google est bloquée).
 export function authorize(clientId) {
@@ -43,6 +50,7 @@ export function authorize(clientId) {
         if (!p) return;
         if (resp.error) return p.reject(new Error('Autorisation Google refusée : ' + resp.error));
         token = resp.access_token;
+        grantedScope = resp.scope || '';
         tokenExpiry = Date.now() + (resp.expires_in || 3600) * 1000;
         p.resolve(token);
       },
