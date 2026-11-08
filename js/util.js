@@ -202,6 +202,29 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 export const speechSupported = !!SR;
 let active = null;
 
+// Pendant la dictée, on empêche l'écran de se mettre en veille (et la tablette de se verrouiller) :
+// parler ne compte pas comme une utilisation de l'écran pour Android.
+let wakeLock = null;
+async function keepAwake(on) {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    if (on && !wakeLock) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => (wakeLock = null));
+    } else if (!on && wakeLock) {
+      const w = wakeLock;
+      wakeLock = null;
+      await w.release();
+    }
+  } catch (e) {
+    console.warn('Mise en veille non bloquée :', e.message);
+  }
+}
+// le verrou saute quand l'appli passe en arrière-plan : on le reprend au retour si la dictée continue
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && active) keepAwake(true);
+});
+
 // Branche un bouton micro sur une zone de texte. Le texte dicté est ajouté à la fin.
 export function attachDictation(button, textarea, onChange) {
   if (!SR) {
@@ -256,6 +279,8 @@ export function attachDictation(button, textarea, onChange) {
         }
       };
       rec.onend = () => {
+        // écran quitté (copie suivante…) : on arrête la dictée et on rend la mise en veille
+        if (!stopped && !button.isConnected) return stop();
         if (!stopped) {
           try {
             run();
@@ -273,10 +298,14 @@ export function attachDictation(button, textarea, onChange) {
       } catch {}
       button.classList.remove('rec');
       interim.remove();
-      if (active && active.button === button) active = null;
+      if (active && active.button === button) {
+        active = null;
+        keepAwake(false);
+      }
     };
     active = { button, stop };
     button.classList.add('rec');
+    keepAwake(true);
     run();
   }
 }
