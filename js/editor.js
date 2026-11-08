@@ -803,21 +803,29 @@ export async function mountEditor(root, ctx) {
         )
         .join('');
     }
+    const fold = prefs.fold || {};
+    const foldBtn = (key, title) =>
+      `<button class="fold-btn" data-p="fold" data-k="${key}" aria-expanded="${!fold[key]}" title="${fold[key] ? 'Ouvrir' : 'Fermer'}"><span class="fold-arrow">▾</span><h3>${title}</h3></button>`;
     panel.innerHTML = `
-      <div class="panel-sec">
+      <div class="panel-sec ${fold.eval ? 'folded' : ''}">
         <div class="panel-head">
-          <h3>Évaluation</h3>
+          ${foldBtn('eval', 'Évaluation')}
           ${res.short ? `<span class="score ${res.complete ? '' : 'partial'}">${esc(res.short)}</span>` : ''}
         </div>
-        ${gridHtml}
+        <div class="fold-body">${gridHtml}</div>
       </div>
-      <div class="panel-sec">
-        <h3>Commentaire</h3>
+      <div class="panel-sec ${fold.comment ? 'folded' : ''}">
+        <div class="panel-head">
+          ${foldBtn('comment', 'Commentaire')}
+          ${fold.comment && (copy.comment || '').trim() ? '<span class="muted small">✓ rédigé</span>' : ''}
+        </div>
+        <div class="fold-body">
         <div class="dictate-wrap">
           <textarea class="input" id="comment" rows="6" placeholder="Écrivez votre commentaire, ou appuyez sur 🎙 pour le dicter">${esc(copy.comment || '')}</textarea>
           <button class="mic" id="cmic" title="Dicter le commentaire">🎙</button>
         </div>
         ${speechSupported ? '<p class="muted small">Dictée : dites « virgule », « point », « à la ligne ».</p>' : '<p class="muted small">Dictée indisponible dans ce navigateur : utilisez Chrome, ou le micro du clavier Samsung.</p>'}
+        </div>
       </div>
       <div class="panel-sec actions">
         <button class="btn ${copy.status === 'done' ? 'success' : 'primary'} block" data-p="done">${copy.status === 'done' ? '✓ Copie corrigée' : 'Marquer comme corrigée'}</button>
@@ -850,6 +858,14 @@ export async function mountEditor(root, ctx) {
     if (!b) return;
     const cid = b.dataset.c;
     switch (b.dataset.p) {
+      case 'fold': {
+        // plier / déplier une partie du panneau (mémorisé d'une copie à l'autre)
+        prefs.fold = { ...(prefs.fold || {}), [b.dataset.k]: !(prefs.fold || {})[b.dataset.k] };
+        savePrefs();
+        renderPanel();
+        if (b.dataset.k === 'comment' && !prefs.fold.comment) $('#comment', panel).focus({ preventScroll: true });
+        return;
+      }
       case 'grid':
         return ctx.editGrid();
       case 'minus':

@@ -441,3 +441,16 @@ section.subject { margin: 18px 0; }
 .sync-btn[data-state='busy'] .sync-ico { animation: syncpulse 1s ease-in-out infinite alternate; }
 .sync-btn[data-state='busy'] .sync-dot { display: none; }
 @keyframes syncpulse { from { opacity: 1; } to { opacity: 0.35; } }
+
+/* ---------- Parties du panneau d'évaluation pliables (flèche) ---------- */
+.fold-btn { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 8px 0 0; margin-left: -4px; border: none; background: none; color: var(--text); cursor: pointer; font: inherit; }
+.fold-btn h3 { margin: 0; }
+.fold-arrow { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--surface-2); font-size: 0.9rem; transition: transform 0.2s; }
+.panel-sec.folded .fold-arrow { transform: rotate(-90deg); }
+.panel-sec.folded .fold-body { display: none; }
+.panel-sec.folded { padding-bottom: 10px; }
+.panel-sec > .panel-head + .fold-body { margin-top: 6px; }
+/* en portrait, le panneau prend juste la place de ce qui est ouvert : la copie récupère le reste */
+@media (max-width: 1100px) and (orientation: portrait) {
+  .ed-panel { height: auto; max-height: 50dvh; }
+}
