@@ -621,6 +621,9 @@ async function studentView(id, semParam) {
 function statusLabel(c, a) {
   const noCopy = a && (a.kind === 'oral' || a.kind === 'groupe');
   if (!c || (!c.pdf && c.status !== 'done')) return noCopy ? '<span class="tag todo">À évaluer</span>' : '<span class="tag">Pas de copie</span>';
+  const mk = c.evaluation && c.evaluation._mark;
+  if (mk === 'absent') return '<span class="tag">🚫 Absent</span>';
+  if (mk === 'missing' && !c.sentAt) return '<span class="tag err">📭 Non rendu</span>';
   if (c.sentAt) return `<span class="tag sent">Envoyée le ${fmtDate(c.sentAt)}</span>`;
   if (c.status === 'done') return `<span class="tag done">${noCopy ? 'Évalué' : 'Corrigée'}</span>${sched.scheduleTag(c)}`;
   return '<span class="tag todo">À corriger</span>';
@@ -887,7 +890,9 @@ async function bulkImport(a, students, copies) {
   const files = (await pickFiles({ accept: ACCEPT_DOCS, multiple: true })).sort((x, y) => x.name.localeCompare(y.name, 'fr', { numeric: true }));
   if (!files.length) return;
   const rows = files.map(f => ({ f, s: guessStudent(f.name, students) }));
-  const opts = s => `<option value="">— Ne pas importer —</option>${students.map(x => `<option value="${x.id}" ${s && s.id === x.id ? 'selected' : ''}>${esc(studentName(x))}</option>`).join('')}`;
+  // champ de recherche (avec suggestions) plutôt qu'une longue liste déroulante
+  const names = new Map(students.map(x => [normalize(studentName(x)), x.id]));
+  const pick = s => `<input class="input" type="search" list="dl-import-students" value="${s ? esc(studentName(s)) : ''}" placeholder="🔍 Élève (vide = ne pas importer)" autocomplete="off">`;
   const icon = f => (/\.docx$/i.test(f.name) ? '📝' : /^image\//.test(f.type) ? '🖼' : '📄');
   let mapping = null,
     append = true;
@@ -897,15 +902,23 @@ async function bulkImport(a, students, copies) {
     wide: true,
     body: `<p class="muted">Vérifiez à quel étudiant correspond chaque fichier (deviné d'après son nom). Plusieurs fichiers pour un même étudiant sont assemblés en une seule copie. Les fichiers Word et les photos sont convertis en PDF.</p>
       <div class="map-list">${rows
-        .map((r, i) => `<div class="map-row"><span class="fname">${icon(r.f)} ${esc(r.f.name)}</span><select class="input" data-i="${i}">${opts(r.s)}</select></div>`)
+        .map(r => `<div class="map-row"><span class="fname">${icon(r.f)} ${esc(r.f.name)}</span>${pick(r.s)}</div>`)
         .join('')}</div>
+      <datalist id="dl-import-students">${students.map(x => `<option value="${esc(studentName(x))}">`).join('')}</datalist>
       ${hasExisting ? '<label class="check"><input type="checkbox" id="append" checked> Si l’élève a déjà une copie, ajouter ces documents à la suite (sinon, la remplacer)</label>' : ''}`,
     actions: [
       { label: 'Annuler', value: false },
       { label: 'Importer', value: true, cls: 'primary' },
     ],
     validate: (v, w) => {
-      mapping = $$('select', w).map(s => s.value);
+      const inputs = $$('.map-row input', w);
+      mapping = inputs.map(i => (i.value.trim() ? names.get(normalize(i.value.trim())) || null : ''));
+      const bad = inputs.find((i, k) => mapping[k] === null);
+      if (bad) {
+        bad.focus();
+        toast(`Élève introuvable : « ${bad.value.trim()} ». Choisissez un nom dans la liste.`, 'error');
+        return false;
+      }
       if ($('#append', w)) append = $('#append', w).checked;
       return true;
     },
@@ -973,6 +986,7 @@ async function sendDialog(a, cls, students, copies) {
   const statusOf = (s, c) => {
     if (!s.email) return 'pas d’e-mail';
     if (!c || c.status !== 'done') return 'non corrigée';
+    if (c.evaluation && c.evaluation._mark === 'absent' && !c.sentAt) return 'absent (non coché)';
     if (c.sentAt) return `déjà envoyée le ${fmtDate(c.sentAt)}`;
     if (c.scheduledAt) return c.scheduleError ? `programmation en échec : ${c.scheduleError}` : `⏰ programmée : ${sched.fmtDateTime(c.scheduledAt)}`;
     return '';
@@ -984,7 +998,8 @@ async function sendDialog(a, cls, students, copies) {
       .map(({ s, c }) => {
         const can = c && c.status === 'done' && s.email;
         const planned = can && !c.sentAt && c.scheduledAt;
-        return `<label class="send-row ${can ? '' : 'disabled'}"><input type="checkbox" data-s="${s.id}" ${can && !c.sentAt && !c.scheduledAt ? 'checked' : ''} ${can ? '' : 'disabled'}>
+        const absent = c && c.evaluation && c.evaluation._mark === 'absent';
+        return `<label class="send-row ${can ? '' : 'disabled'}"><input type="checkbox" data-s="${s.id}" ${can && !c.sentAt && !c.scheduledAt && !absent ? 'checked' : ''} ${can ? '' : 'disabled'}>
           <span class="sr-name">${esc(studentName(s))}<small>${esc(s.email || '')}</small></span><span class="sr-status" data-st="${s.id}">${esc(statusOf(s, c))}${planned ? ` <button type="button" class="linkbtn" data-unsched="${s.id}">annuler</button>` : ''}</span></label>`;
       })
       .join('')}</div>

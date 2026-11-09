@@ -183,7 +183,11 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
 
   const grid = assignment.grid;
   const r = computeResult(grid, copy.evaluation || {});
-  if (r.lines && r.lines.length) {
+  if (r.mark) {
+    // absent / non rendu : une seule ligne
+    text(r.totalLine, { f: bold, size: 14, color: accent });
+    y -= 10;
+  } else if (r.lines && r.lines.length) {
     const colW = W - 2 * M;
     const valW = 170;
     ensure(24);

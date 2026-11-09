@@ -1017,6 +1017,17 @@ export async function mountEditor(root, ctx) {
       else if (ctx.groupMember)
         gridHtml += `<div class="crit part-sec"><div class="crit-label">Participation individuelle</div>${partRow('self', 'Points en plus ou en moins', +copy.evaluation._part || 0)}</div>`;
     }
+    // absent / non rendu
+    const mark = copy.evaluation._mark;
+    const markBar = `<div class="mark-bar">${[
+      ['absent', '🚫 Absent', 'Pas de note, hors moyenne'],
+      ['missing', '📭 Non rendu', 'Note de 0'],
+    ]
+      .map(([k, label, tip]) => `<button class="lvl mark ${mark === k ? 'on' : ''}" data-p="mark" data-k="${k}" title="${tip}">${label}</button>`)
+      .join('')}</div>`;
+    if (mark)
+      gridHtml = `${markBar}<p class="mark-note">${mark === 'absent' ? 'Élève absent : pas de note, l’évaluation ne compte pas dans sa moyenne.' : 'Devoir non rendu : note de 0, qui compte dans la moyenne.'} Touchez à nouveau le bouton pour annuler.</p>`;
+    else gridHtml = markBar + gridHtml;
     const fold = prefs.fold || {};
     const foldBtn = (key, title) =>
       `<button class="fold-btn" data-p="fold" data-k="${key}" aria-expanded="${!fold[key]}" title="${fold[key] ? 'Ouvrir' : 'Fermer'}"><span class="fold-arrow">▾</span><h3>${title}</h3></button>`;
@@ -1105,6 +1116,24 @@ export async function mountEditor(root, ctx) {
           renderPanel();
           await ctx.setParticipation(m.id, m.part);
         }
+        return;
+      }
+      case 'mark': {
+        const k = b.dataset.k;
+        if (copy.evaluation._mark === k) {
+          delete copy.evaluation._mark;
+          if (copy.status === 'done' && copy.markedDone) copy.status = 'todo';
+          delete copy.markedDone;
+        } else {
+          copy.evaluation._mark = k;
+          if (copy.status !== 'done') {
+            copy.status = 'done';
+            copy.correctedAt = Date.now();
+            copy.markedDone = true;
+          }
+        }
+        renderPanel();
+        changed();
         return;
       }
       case 'malus':

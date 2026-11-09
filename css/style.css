@@ -515,3 +515,9 @@ button.file-chip { cursor: pointer; font: inherit; border: none; }
 .part-val.minus { color: var(--danger); }
 .private-sec { background: var(--surface-2); }
 .private-sec .input { background: var(--surface); }
+
+/* ---------- Absent / non rendu, recherche d'élèves ---------- */
+.mark-bar { display: flex; gap: 6px; flex-wrap: wrap; margin: 2px 0 8px; }
+.lvl.mark.on { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
+.mark-note { margin: 6px 0; padding: 10px 12px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); font-weight: 600; font-size: 0.92rem; }
+.list-search { margin-bottom: 8px; }

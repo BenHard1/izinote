@@ -88,8 +88,27 @@ export function modal({ title, body = '', actions = [{ label: 'OK', value: true,
       };
     });
     onOpen && onOpen(wrap, close);
+    addListSearch(wrap);
     const first = wrap.querySelector('input:not([type=checkbox]):not([type=file]), textarea, select');
     if (first) setTimeout(() => !wrap.contains(document.activeElement) && first.focus(), 50);
+  });
+}
+
+// Barre de recherche au-dessus des listes d'élèves à cocher (groupes, envois…).
+function addListSearch(root) {
+  root.querySelectorAll('.send-list').forEach(list => {
+    if (list.previousElementSibling && list.previousElementSibling.classList.contains('list-search')) return;
+    if (list.querySelectorAll('.send-row').length < 6) return;
+    const inp = document.createElement('input');
+    inp.type = 'search';
+    inp.className = 'input list-search';
+    inp.placeholder = '🔍 Rechercher un élève…';
+    inp.setAttribute('autocomplete', 'off');
+    list.before(inp);
+    inp.addEventListener('input', () => {
+      const q = normalize(inp.value.trim());
+      list.querySelectorAll('.send-row').forEach(r => (r.style.display = !q || normalize(r.textContent).includes(q) ? '' : 'none'));
+    });
   });
 }
 
@@ -344,7 +363,21 @@ export function appliedMalus(grid, evaluation = {}) {
 }
 
 // Résultat d'une évaluation : { complete, total, max, scaled, text, short }
+// Élève absent (pas de note, hors moyenne) ou devoir non rendu (0) : evaluation._mark = 'absent' | 'missing'.
+export const MARKS = { absent: 'Absent', missing: 'Non rendu' };
+export const markOf = evaluation => (evaluation && MARKS[evaluation._mark] ? evaluation._mark : null);
+
 export function computeResult(grid, evaluation = {}) {
+  const mark = markOf(evaluation);
+  if (mark === 'absent') return { complete: true, short: 'Absent', lines: [], totalLine: 'Absent : pas de note pour cette évaluation.', mark };
+  if (mark === 'missing') {
+    if (grid && grid.mode === 'note' && grid.criteria && grid.criteria.length) {
+      const max = grid.criteria.reduce((t, c) => t + (+c.max || 0), 0);
+      const top = grid.scaleTo || max;
+      return { complete: true, total: 0, max, scaled: grid.scaleTo ? 0 : null, short: `0/${fmtNum(top)}`, lines: [], totalLine: `Devoir non rendu : 0 / ${fmtNum(top)}`, mark };
+    }
+    return { complete: true, short: 'Non rendu', lines: [], totalLine: 'Devoir non rendu.', mark };
+  }
   if (!grid || !grid.criteria || !grid.criteria.length) return { complete: true, short: '', lines: [] };
   const lines = [];
   if (grid.mode === 'note') {
@@ -399,6 +432,7 @@ export function computeResult(grid, evaluation = {}) {
 
 export function resultText(grid, evaluation) {
   const r = computeResult(grid, evaluation);
+  if (r.mark) return r.totalLine;
   if (!r.lines.length) return '';
   return ['Évaluation :', ...r.lines.map(l => `- ${l.label} : ${l.value}`), r.totalLine].join('\n');
 }
@@ -406,6 +440,8 @@ export function resultText(grid, evaluation) {
 // Note ramenée sur 20 (grilles en points seulement), ou null.
 export function noteOn20(grid, evaluation = {}) {
   if (!grid || grid.mode !== 'note' || !grid.criteria || !grid.criteria.length) return null;
+  if (markOf(evaluation) === 'absent') return null;
+  if (markOf(evaluation) === 'missing') return 0;
   const r = computeResult(grid, evaluation);
   if (!r.max || !Object.keys(evaluation || {}).some(k => grid.criteria.some(c => c.id === k))) return null;
   if (r.scaled != null) return (r.scaled / grid.scaleTo) * 20;
@@ -416,6 +452,7 @@ export function noteOn20(grid, evaluation = {}) {
 export function resultCell(grid, evaluation = {}) {
   if (!grid || !grid.criteria || !grid.criteria.length) return '';
   const r = computeResult(grid, evaluation);
+  if (markOf(evaluation) === 'absent') return 'ABS';
   if (grid.mode === 'note') {
     if (!Object.keys(evaluation || {}).length) return '';
     const v = r.scaled != null ? r.scaled : r.total;
