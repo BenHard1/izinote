@@ -112,6 +112,55 @@ function addListSearch(root) {
   });
 }
 
+// Pastille d'envoi en haut à droite : « Envoi 10/30 » avec une barre de progression.
+// L'envoi continue pendant qu'on fait autre chose ; à la fin, la pastille dit le résultat.
+export function progressPill(label, total) {
+  let stack = document.getElementById('pillStack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'pillStack';
+    document.body.appendChild(stack);
+  }
+  const el = document.createElement('div');
+  el.className = 'send-pill';
+  stack.appendChild(el);
+  let ok = 0;
+  const errors = [];
+  const draw = () => {
+    const n = ok + errors.length;
+    el.innerHTML = `<div class="pill-top"><span class="pill-ico">✉</span><span class="pill-txt">${esc(label)} <b>${n}/${total}</b></span>${
+      errors.length ? `<span class="pill-err">${errors.length} ✗</span>` : ''
+    }</div><div class="pill-bar"><span style="width:${total ? Math.round((n / total) * 100) : 0}%"></span></div>`;
+  };
+  draw();
+  const showErrors = () =>
+    modal({
+      title: 'Envois en échec',
+      body: `<ul class="steps">${errors.map(e => `<li><b>${esc(e.who)}</b> : ${esc(e.msg)}</li>`).join('')}</ul>`,
+      actions: [{ label: 'Fermer', value: true, cls: 'primary' }],
+    });
+  return {
+    ok() {
+      ok++;
+      draw();
+    },
+    fail(who, msg) {
+      errors.push({ who, msg });
+      draw();
+    },
+    done(doneLabel) {
+      el.classList.add(errors.length ? 'has-err' : 'done');
+      el.innerHTML = `<div class="pill-top"><span class="pill-ico">${errors.length ? '⚠' : '✓'}</span><span class="pill-txt">${esc(doneLabel || label)} <b>${ok}/${total}</b>${
+        errors.length ? ` · ${errors.length} échec${errors.length > 1 ? 's' : ''} (voir)` : ''
+      }</span><button class="pill-x" aria-label="Fermer">✕</button></div>`;
+      const remove = () => el.remove();
+      el.querySelector('.pill-x').onclick = e => (e.stopPropagation(), remove());
+      if (errors.length) el.onclick = showErrors;
+      else setTimeout(remove, 6000);
+    },
+  };
+}
+
 export async function confirmBox(title, text, okLabel = 'Confirmer', danger = false) {
   return (
     (await modal({

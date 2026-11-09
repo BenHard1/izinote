@@ -7,7 +7,7 @@
 import * as db from './db.js';
 import * as gmail from './gmail.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
-import { computeResult, resultText, toast, esc, fullComment } from './util.js';
+import { computeResult, resultText, toast, esc, fullComment, progressPill } from './util.js';
 
 export function mailVars(a, cls, s, c, settings) {
   const r = computeResult(a.grid, c?.evaluation || {});
@@ -209,28 +209,60 @@ async function sendDue(list) {
   running = true;
   const st = await db.getSettings();
   let ok = 0;
-  const b = bar();
+  hideBar();
+  const pill = progressPill('Envoi programmé', list.length);
   try {
     for (const t of list) {
-      b.innerHTML = `<span>⏰ Envoi programmé ${ok + 1} / ${list.length}…</span>`;
       try {
         await t.send(st);
         ok++;
+        pill.ok();
       } catch (e) {
         if (!e.final && !gmail.hasValidToken()) break; // autorisation expirée : on redemandera un clic
         await t.fail(e.message);
+        pill.fail(t.who || 'Envoi', e.message);
       }
     }
   } finally {
     running = false;
+    pill.done('Envois programmés');
   }
-  if (ok) toast(`${ok} envoi${ok > 1 ? 's' : ''} programmé${ok > 1 ? 's' : ''} effectué${ok > 1 ? 's' : ''} ✓`, 'success');
   onChange();
   await checkScheduled();
 }
 
+// Relais installé : les copies programmées « dans l'appli » lui sont confiées (même celles déjà à l'heure),
+// pour qu'elles partent seules, sans demander de connexion Google.
+let handingOver = false;
+async function handOverToRelay() {
+  const st = await db.getSettings();
+  if (!hasRelay(st) || handingOver) return 0;
+  const list = (await db.all('copies')).filter(c => c.scheduledVia === 'local' && !c.sentAt && !c.scheduleError);
+  if (!list.length) return 0;
+  handingOver = true;
+  let n = 0;
+  try {
+    for (const c of list) {
+      const [a, s] = await Promise.all([db.get('assignments', c.assignmentId), db.get('students', c.studentId)]);
+      if (!a || !s || !s.email) continue;
+      const cls = await db.get('classes', a.classId);
+      await relaySchedule(st, c, await prepareMail(a, cls, s, c, st), Math.max(c.scheduledAt, Date.now()));
+      c.scheduledVia = 'relay';
+      await db.put('copies', c);
+      n++;
+    }
+  } catch (e) {
+    console.warn('Relais :', e.message);
+  } finally {
+    handingOver = false;
+  }
+  if (n) onChange();
+  return n;
+}
+
 export async function checkScheduled() {
   if (running) return;
+  await handOverToRelay();
   const due = await dueTasks();
   if (!due.length) return hideBar();
   const st = await db.getSettings();
@@ -238,7 +270,9 @@ export async function checkScheduled() {
   gmail.loadGis().catch(() => {});
   if (gmail.hasValidToken()) return sendDue(due);
   const b = bar();
-  b.innerHTML = `<span>⏰ ${due.length} envoi${due.length > 1 ? 's programmés sont prêts' : ' programmé est prêt'} à partir.</span><button class="btn primary">Envoyer maintenant</button>`;
+  b.innerHTML = `<span>⏰ ${due.length} envoi${due.length > 1 ? 's programmés sont prêts' : ' programmé est prêt'} à partir.</span><button class="btn primary">Envoyer maintenant</button>${
+    hasRelay(st) ? '' : '<a class="sched-hint" href="#/reglages">Pour que ça parte tout seul : installer le relais</a>'
+  }`;
   b.querySelector('button').onclick = async () => {
     try {
       await gmail.authorize(st.googleClientId); // dans le clic : la fenêtre Google peut s'ouvrir

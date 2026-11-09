@@ -1,6 +1,6 @@
 import * as db from './db.js';
 import {
-  esc, $, $$, modal, form, toast, confirmBox, confirmTyped, pickFiles, download, normalize, studentName,
+  esc, $, $$, modal, form, toast, progressPill, confirmBox, confirmTyped, pickFiles, download, normalize, studentName,
   computeResult, resultText, newGrid, fmtNum, parseNum, fmtDate, DEFAULT_LEVELS,
   KINDS, kindLabel, imageToDataUrl, dateOf, shortDate,
   busy,
@@ -1012,8 +1012,9 @@ async function sendDialog(a, cls, students, copies) {
         <p class="muted small">${
           relay
             ? 'Les mails partiront de votre Gmail à l’heure prévue (à 5 minutes près), même si la tablette est éteinte. Les PDF sont préparés maintenant : si vous modifiez une copie ensuite, reprogrammez-la.'
-            : 'Les mails partiront à l’heure prévue si IziNote est ouvert sur la tablette ; sinon, à la prochaine ouverture (Google peut demander un clic de confirmation). Pour un envoi même tablette éteinte, activez le « relais d’envoi programmé » dans les Réglages.'
+            : 'Sans relais, les mails partent seulement si IziNote est ouvert à l’heure prévue, et Google peut redemander de se connecter.'
         }</p>
+        ${relay ? '' : `<div class="banner warn">Pour que les envois programmés partent <b>tout seuls</b>, sans vous connecter et même tablette éteinte, installez une fois le relais gratuit (5 minutes). <a href="#/reglages" id="goRelay">Installer le relais</a></div>`}
       </div>
     </div>
     <details class="preview"><summary>Aperçu du message</summary><pre id="prev"></pre></details>`;
@@ -1030,6 +1031,7 @@ async function sendDialog(a, cls, students, copies) {
         $('#prev', w).textContent = `À : ${first.s.email || '?'}\nObjet : ${gmail.fillTemplate(settings.mailSubject, v)}\n\n${gmail.fillTemplate(settings.mailBody, v)}\n\n📎 ${correctedFileName(first.s, a)}`;
       }
       const sendBtn = $('.modal-actions .primary', w);
+      if ($('#goRelay', w)) $('#goRelay', w).onclick = () => close(null);
       const schedOn = $('#schedOn', w);
       schedOn.onchange = () => {
         $('#schedFields', w).hidden = !schedOn.checked;
@@ -1073,16 +1075,29 @@ async function sendDialog(a, cls, students, copies) {
             sendBtn.disabled = false;
             return toast(e.message, 'error');
           }
+          // l'envoi continue en arrière-plan, avec une pastille de progression en haut à droite
+          close(null);
+          const pill = progressPill('Envoi', ids.length);
+          for (const sid of ids) {
+            const { s, c } = rows.find(r => r.s.id === sid);
+            try {
+              await sched.sendNow(a, cls, s, c, settings);
+              pill.ok();
+            } catch (e) {
+              console.error(e);
+              pill.fail(studentName(s), e.message);
+            }
+            if (/^#\/devoir\//.test(location.hash) && !document.querySelector('.modal-wrap')) router();
+          }
+          pill.done(`Corrections envoyées – ${a.title}`);
+          return;
         }
         let ok = 0;
         for (const sid of ids) {
           const { s, c } = rows.find(r => r.s.id === sid);
-          setStatus(sid, later ? 'programmation…' : 'envoi…', 'busy');
+          setStatus(sid, 'programmation…', 'busy');
           try {
-            if (!later) {
-              await sched.sendNow(a, cls, s, c, settings);
-              setStatus(sid, '✓ envoyée', 'ok');
-            } else {
+            {
               if (relay) await sched.relaySchedule(settings, c, await sched.prepareMail(a, cls, s, c, settings), when);
               else if (c.scheduledVia === 'relay') await sched.relayCancel(settings, [c.id]).catch(() => {});
               sched.clearSchedule(c);
@@ -1100,6 +1115,7 @@ async function sendDialog(a, cls, students, copies) {
         }
         sendBtn.disabled = false;
         const n = ids.length;
+        if (later && !relay) toast('Astuce : installez le relais d’envoi programmé (Réglages) pour que ces mails partent tout seuls, sans vous reconnecter.');
         if (later) toast(`${ok}/${n} envoi${n > 1 ? 's' : ''} programmé${ok > 1 ? 's' : ''} pour ${sched.fmtDateTime(when)}`, ok === n ? 'success' : 'error');
         else toast(`${ok}/${n} mail${n > 1 ? 's' : ''} envoyé${ok > 1 ? 's' : ''}`, ok === n ? 'success' : 'error');
       };
