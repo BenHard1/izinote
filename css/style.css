@@ -477,3 +477,14 @@ section.subject { margin: 18px 0; }
 /* ---------- Malus ---------- */
 .malus-sec .crit-label { color: var(--danger); }
 .lvl.malus.on { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }
+
+/* Devoir à rendre : consignes, documents, envoi et rappels */
+.hw-box { margin: 16px 0; padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.hw-box.hw-empty { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; background: var(--surface-2); }
+.hw-box.hw-empty p { margin: 4px 0 0; }
+.hw-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.hw-head > div:first-child { display: flex; flex-direction: column; gap: 2px; }
+.hw-text { white-space: pre-wrap; margin: 10px 0; max-height: 9em; overflow: auto; }
+.hw-status { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
+.hw-status .tag { margin-left: 6px; }
+button.file-chip { cursor: pointer; font: inherit; border: none; }

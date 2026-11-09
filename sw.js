@@ -1,8 +1,8 @@
 // Service worker : l'appli fonctionne même sans connexion (sauf dictée et envoi des mails).
-const CACHE = 'izinote-v17';
+const CACHE = 'izinote-v18';
 const ASSETS = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
-  'js/app.js', 'js/db.js', 'js/util.js', 'js/editor.js', 'js/pdfexport.js', 'js/gmail.js', 'js/reports.js', 'js/gridimport.js', 'js/convert.js', 'js/stamps.js', 'js/schedule.js', 'js/relayscript.js', 'js/distribute.js', 'js/sync.js',
+  'js/app.js', 'js/db.js', 'js/util.js', 'js/editor.js', 'js/pdfexport.js', 'js/gmail.js', 'js/reports.js', 'js/gridimport.js', 'js/convert.js', 'js/stamps.js', 'js/schedule.js', 'js/relayscript.js', 'js/distribute.js', 'js/homework.js', 'js/sync.js',
   'lib/pdf.min.js', 'lib/pdf.worker.min.js', 'lib/pdf-lib.min.js', 'lib/xlsx.full.min.js', 'lib/word/jszip.min.js', 'lib/word/docx-preview.min.js', 'lib/word/html2canvas.min.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/favicon-64.png',
   'assets/logo-simplifie.png', 'assets/logo-complet.png', 'assets/icone.png',

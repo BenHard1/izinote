@@ -5,6 +5,7 @@ export const relayScript = secret => `// IziNote – relais d'envoi programmé.
 // et les envoie depuis ce compte Gmail à l'heure prévue, même si la tablette est éteinte.
 const SECRET = '${secret}';
 const DOSSIER = 'IziNote – envois programmés';
+const VERSION = 2; // 2 : copie cachée et plusieurs pièces jointes (devoirs et rappels)
 
 // 1) Exécutez cette fonction une fois (bouton ▶ Exécuter) et acceptez les autorisations.
 function installer() {
@@ -20,7 +21,7 @@ function doPost(e) {
     const d = JSON.parse(e.postData.contents);
     if (d.secret !== SECRET) return json_({ ok: false, error: 'code secret incorrect' });
     const racine = dossier_();
-    if (d.action === 'ping') return json_({ ok: true, quota: MailApp.getRemainingDailyQuota() });
+    if (d.action === 'ping') return json_({ ok: true, version: VERSION, quota: MailApp.getRemainingDailyQuota() });
     if (d.action === 'schedule') {
       const m = d.mail;
       supprimer_(racine, m.id + '.json');
@@ -58,8 +59,13 @@ function envoyerProgrammes() {
       try {
         const opts = {};
         if (m.fromName) opts.name = m.fromName;
-        if (m.pdf) opts.attachments = [Utilities.newBlob(Utilities.base64Decode(m.pdf), 'application/pdf', m.fileName || 'correction.pdf')];
-        GmailApp.sendEmail(m.to, m.subject, m.body, opts);
+        if (m.bcc) opts.bcc = m.bcc;
+        const pj = [];
+        if (m.pdf) pj.push(Utilities.newBlob(Utilities.base64Decode(m.pdf), 'application/pdf', m.fileName || 'correction.pdf'));
+        (m.attachments || []).forEach(a => pj.push(Utilities.newBlob(Utilities.base64Decode(a.b64), a.type || 'application/octet-stream', a.name)));
+        if (pj.length) opts.attachments = pj;
+        // envoi groupé en copie cachée : le mail est adressé au compte lui-même
+        GmailApp.sendEmail(m.to || Session.getEffectiveUser().getEmail(), m.subject, m.body, opts);
         sous_('envoyes').createFile(m.id + '.txt', String(Date.now()));
         f.setTrashed(true);
       } catch (err) {

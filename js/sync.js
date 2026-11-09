@@ -4,7 +4,8 @@
 // caché, propre à IziNote, invisible dans Drive et qu'IziNote est seul à pouvoir lire.
 //  - izinote-donnees.json : toutes les données (écoles, classes, étudiants, devoirs, copies sans le PDF,
 //    grilles, réglages) et la liste des suppressions ;
-//  - pdf_<copie>_<version>.pdf : le PDF de chaque copie, envoyé une seule fois par version.
+//  - pdf_<copie>_<version>.pdf : le PDF de chaque copie, envoyé une seule fois par version ;
+//  - doc_<document> : les documents de travail joints aux devoirs (jamais modifiés, envoyés une seule fois).
 //
 // Fusion enregistrement par enregistrement : la version modifiée en dernier gagne, et une suppression
 // plus récente que la dernière modification l'emporte. On peut donc travailler hors ligne sur deux
@@ -113,6 +114,7 @@ async function upload(token, { id, name, blob }) {
 const download = async (token, id) => (await api(`${API}/files/${id}?alt=media`, {}, token)).blob();
 const remove = (token, id) => api(`${API}/files/${id}`, { method: 'DELETE' }, token).catch(() => {});
 const pdfName = (copyId, rev) => `pdf_${copyId}_${rev}.pdf`;
+const docName = docId => `doc_${docId}`;
 
 // ---------- Synchronisation ----------
 let running = null;
@@ -226,6 +228,16 @@ async function syncWith(token, localClientId) {
             }
           }
         }
+        if (name === 'assignments' && rec.docs) {
+          rec.docs = await Promise.all(
+            rec.docs.map(async d => {
+              const ld = (l?.docs || []).find(x => x.id === d.id && x.blob instanceof Blob);
+              if (ld) return { ...d, blob: ld.blob };
+              const f = byName.get(docName(d.id));
+              return { ...d, blob: f ? new Blob([await download(token, f.id)], { type: d.type || 'application/octet-stream' }) : null };
+            })
+          );
+        }
         await db.putRaw(name, rec);
         applied++;
       } else if (name === 'copies' && l.pdf instanceof Blob && l.pdfRev && !byName.has(pdfName(id, l.pdfRev))) {
@@ -233,8 +245,17 @@ async function syncWith(token, localClientId) {
         const fid = await upload(token, { name: pdfName(id, l.pdfRev), blob: l.pdf });
         byName.set(pdfName(id, l.pdfRev), { id: fid, name: pdfName(id, l.pdfRev) });
       }
+      if (name === 'assignments' && l) {
+        // documents de travail ajoutés sur cet appareil
+        for (const d of l.docs || []) {
+          if (!(d.blob instanceof Blob) || byName.has(docName(d.id))) continue;
+          const fid = await upload(token, { name: docName(d.id), blob: d.blob });
+          byName.set(docName(d.id), { id: fid, name: docName(d.id) });
+        }
+      }
       const pub = { ...win };
       if (name === 'copies') delete pub.pdf;
+      if (name === 'assignments' && pub.docs) pub.docs = pub.docs.map(({ blob, ...d }) => d);
       out.push(pub);
     }
     merged[name] = out;
@@ -255,6 +276,8 @@ async function syncWith(token, localClientId) {
   // ménage : PDF qui ne servent plus à aucune copie
   const used = new Set(merged.copies.filter(c => c.pdfRev).map(c => pdfName(c.id, c.pdfRev)));
   for (const f of files) if (f.name.startsWith('pdf_') && !used.has(f.name)) await remove(token, f.id);
+  const usedDocs = new Set(merged.assignments.flatMap(a => (a.docs || []).map(d => docName(d.id))));
+  for (const f of files) if (f.name.startsWith('doc_') && !usedDocs.has(f.name)) await remove(token, f.id);
 
   // ID client propre à l'appareil (si les réglages viennent d'ailleurs, on garde celui qui marche ici)
   if (applied && localClientId) {

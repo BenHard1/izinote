@@ -10,6 +10,7 @@ import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
 import * as gmail from './gmail.js';
 import * as sched from './schedule.js';
 import { distributeDialog, mailingsSection } from './distribute.js';
+import * as hw from './homework.js';
 import { relayScript } from './relayscript.js';
 import { classData, average, semesterOf, exportClassXlsx, studentRecapPdf } from './reports.js';
 import { readGridFile } from './gridimport.js';
@@ -426,7 +427,7 @@ async function classView(id) {
       { name: 'title', label: 'Titre', required: true, placeholder: 'Ex. Exercice 3 – Les fonctions' },
       { name: 'kind', label: 'Type', type: 'select', value: 'devoir', options: KINDS },
       { name: 'subject', label: 'Matière (facultatif)', datalist: subjects, placeholder: 'Ex. Mathématiques' },
-      { name: 'dueDate', label: 'Date', type: 'date', value: new Date().toISOString().slice(0, 10) },
+      { name: 'dueDate', label: 'Date (de rendu pour un devoir)', type: 'date', value: new Date().toISOString().slice(0, 10), help: 'Ensuite, sur la page du devoir : consignes, documents de travail, envoi aux élèves et rappels.' },
     ], 'Créer');
     if (!v) return;
     const a = await db.put('assignments', { classId: id, semesterId: current.id, title: v.title, kind: v.kind, subject: v.subject, dueDate: v.dueDate, grid: newGrid('note'), groups: [], createdAt: Date.now() });
@@ -478,6 +479,7 @@ async function classView(id) {
         cls.name
       )
     ) {
+      for (const a of all) await hw.cancelPending(a).catch(e => console.warn(e));
       await db.deleteClass(id);
       toast('Classe supprimée');
       go('#/ecole/' + cls.schoolId);
@@ -663,6 +665,8 @@ async function assignmentView(id) {
         <a class="btn small" href="#/grille/devoir/${id}">${grid.criteria.length ? 'Modifier la grille' : 'Créer la grille'}</a></div>
     </div>
 
+    ${hw.homeworkSection(a)}
+
     ${allDone && sent < students.length ? `<div class="banner success">✓ Toute la classe est évaluée. Vous pouvez envoyer les résultats.</div>` : ''}
 
     <div class="row wrap actions-bar">
@@ -694,6 +698,7 @@ async function assignmentView(id) {
 
     <div class="list">${students.map(studentRow).join('') || `<p class="muted" style="padding:14px">Aucun étudiant dans cette classe. <a href="#/classe/${cls.id}">Ajoutez-les ici.</a></p>`}</div></div>`;
 
+  hw.bindHomework(a, students, () => router());
   if ($('#import')) $('#import').onclick = () => bulkImport(a, students, copies);
   $$('[data-up]').forEach(b => (b.onclick = () => uploadFor(a, students.find(s => s.id === b.dataset.up), copyOf(b.dataset.up))));
   $('#send').onclick = () => sendDialog(a, cls, students, copies);
@@ -721,13 +726,17 @@ async function assignmentView(id) {
       { name: 'dueDate', label: 'Date', type: 'date', value: a.dueDate || '' },
     ]);
     if (v) {
+      const moved = v.dueDate !== a.dueDate;
       Object.assign(a, v);
+      // date de rendu changée : les rappels déjà programmés suivent
+      if (moved && a.dueDate && a.handout) await hw.planMails(a, await db.getSettings()).catch(e => toast(e.message, 'error'));
       await db.put('assignments', a);
       router();
     }
   };
   view.querySelector('[data-act=delete]').onclick = async () => {
     if (await confirmTyped('Supprimer l’évaluation', 'Toutes les copies et évaluations liées seront supprimées.', a.title)) {
+      await hw.cancelPending(a).catch(e => console.warn(e)); // devoir et rappels pas encore partis
       await db.deleteAssignment(id);
       go('#/classe/' + cls.id);
     }
@@ -1466,6 +1475,7 @@ async function settingsView() {
       <label class="field"><span>URL du relais</span><input class="input" id="relayUrl" value="${esc(s.relayUrl || '')}" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" spellcheck="false"></label>
       <div class="row wrap"><button class="btn" id="relayTest">Tester le relais</button></div>
       <p class="muted small">Le relais garde les mails programmés dans votre Google Drive (dossier « IziNote – envois programmés ») et vérifie toutes les 5 minutes s’il y a des mails à envoyer. Un compte Gmail gratuit peut envoyer environ 100 mails par jour avec ce relais.</p>
+      <p class="muted small">Relais installé avant les rappels de devoirs ? Recopiez le code ci-dessus dans script.google.com, enregistrez, puis « Déployer › Gérer les déploiements › ✎ Modifier › Version : Nouvelle version › Déployer » (l’URL ne change pas).</p>
     </section>
 
     <section class="card-sec" id="syncSec">

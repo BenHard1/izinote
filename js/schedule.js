@@ -100,12 +100,40 @@ export async function relaySchedule(st, c, msg, sendAt) {
 
 export const relayCancel = (st, ids) => relayCall(st, { action: 'cancel', ids });
 
+// Autres envois programmés (ex. devoirs et rappels, homework.js), branchés sur le même planificateur.
+//  source = { relayIds(): ids en attente via le relais, applyRelay(data): nb envoyés (+ ids à acquitter),
+//             due(): [{ send(settings), fail(message) }] à envoyer maintenant depuis l'appli }
+const sources = [];
+export function registerSource(src) {
+  sources.push(src);
+}
+
+// Mail « brut » (copie cachée, plusieurs pièces jointes) confié au relais. Demande un relais à jour (version 2).
+export async function relayScheduleMail(st, mail) {
+  await relayCall(st, {
+    action: 'schedule',
+    mail: {
+      ...mail,
+      fromName: st.teacherName || '',
+      attachments: (mail.attachments || []).map(f => ({ name: f.name, type: f.type || 'application/octet-stream', b64: bytesToB64(f.bytes) })),
+    },
+  });
+}
+let relayVersion = null;
+export async function relaySupportsBcc(st) {
+  if (!hasRelay(st)) return false;
+  if (relayVersion === null) relayVersion = (await relayCall(st, { action: 'ping' })).version || 1;
+  return relayVersion >= 2;
+}
+
 // Récupère auprès du relais les envois effectués, et met les copies à jour.
 export async function relaySync() {
   const st = await db.getSettings();
   if (!hasRelay(st)) return 0;
   const waiting = (await db.all('copies')).filter(c => c.scheduledVia === 'relay' && !c.sentAt);
-  if (!waiting.length) return 0;
+  let others = 0;
+  for (const src of sources) others += (await src.relayIds()).length;
+  if (!waiting.length && !others) return 0;
   const data = await relayCall(st, { action: 'status' });
   let n = 0;
   const ack = [];
@@ -120,6 +148,11 @@ export async function relaySync() {
       c.scheduleError = data.errors[c.id];
       await db.put('copies', c);
     }
+  }
+  for (const src of sources) {
+    const r = await src.applyRelay(data);
+    n += r.n;
+    ack.push(...r.ack);
   }
   if (ack.length) await relayCall(st, { action: 'ack', ids: ack }).catch(() => {});
   return n;
@@ -152,6 +185,25 @@ function hideBar() {
   if (b) b.remove();
 }
 
+// Tâches à envoyer maintenant : copies programmées + autres sources (devoirs, rappels…)
+async function dueTasks() {
+  const tasks = (await dueLocal())
+    .filter(c => !c.scheduleError)
+    .map(c => ({
+      send: async st => {
+        const [a, s] = await Promise.all([db.get('assignments', c.assignmentId), db.get('students', c.studentId)]);
+        if (!a || !s || !s.email) throw Object.assign(new Error('élève ou adresse e-mail introuvable'), { final: true });
+        await sendNow(a, await db.get('classes', a.classId), s, c, st);
+      },
+      fail: async msg => {
+        c.scheduleError = msg;
+        await db.put('copies', c);
+      },
+    }));
+  for (const src of sources) tasks.push(...(await src.due()));
+  return tasks;
+}
+
 async function sendDue(list) {
   if (running) return;
   running = true;
@@ -159,42 +211,34 @@ async function sendDue(list) {
   let ok = 0;
   const b = bar();
   try {
-    for (const c of list) {
+    for (const t of list) {
       b.innerHTML = `<span>⏰ Envoi programmé ${ok + 1} / ${list.length}…</span>`;
-      const [a, s] = await Promise.all([db.get('assignments', c.assignmentId), db.get('students', c.studentId)]);
-      if (!a || !s || !s.email) {
-        c.scheduleError = 'élève ou adresse e-mail introuvable';
-        await db.put('copies', c);
-        continue;
-      }
-      const cls = await db.get('classes', a.classId);
       try {
-        await sendNow(a, cls, s, c, st);
+        await t.send(st);
         ok++;
       } catch (e) {
-        if (!gmail.hasValidToken()) break; // autorisation expirée : on redemandera un clic
-        c.scheduleError = e.message;
-        await db.put('copies', c);
+        if (!e.final && !gmail.hasValidToken()) break; // autorisation expirée : on redemandera un clic
+        await t.fail(e.message);
       }
     }
   } finally {
     running = false;
   }
-  if (ok) toast(`${ok} correction${ok > 1 ? 's' : ''} programmée${ok > 1 ? 's' : ''} envoyée${ok > 1 ? 's' : ''} ✓`, 'success');
+  if (ok) toast(`${ok} envoi${ok > 1 ? 's' : ''} programmé${ok > 1 ? 's' : ''} effectué${ok > 1 ? 's' : ''} ✓`, 'success');
   onChange();
   await checkScheduled();
 }
 
 export async function checkScheduled() {
   if (running) return;
-  const due = (await dueLocal()).filter(c => !c.scheduleError);
+  const due = await dueTasks();
   if (!due.length) return hideBar();
   const st = await db.getSettings();
   if (!st.googleClientId) return hideBar();
   gmail.loadGis().catch(() => {});
   if (gmail.hasValidToken()) return sendDue(due);
   const b = bar();
-  b.innerHTML = `<span>⏰ ${due.length} correction${due.length > 1 ? 's programmées sont prêtes' : ' programmée est prête'} à partir.</span><button class="btn primary">Envoyer maintenant</button>`;
+  b.innerHTML = `<span>⏰ ${due.length} envoi${due.length > 1 ? 's programmés sont prêts' : ' programmé est prêt'} à partir.</span><button class="btn primary">Envoyer maintenant</button>`;
   b.querySelector('button').onclick = async () => {
     try {
       await gmail.authorize(st.googleClientId); // dans le clic : la fenêtre Google peut s'ouvrir
@@ -209,7 +253,7 @@ export function startScheduler() {
   const tick = () => {
     checkScheduled().catch(e => console.error(e));
     relaySync()
-      .then(n => n && (toast(`${n} correction${n > 1 ? 's programmées ont été envoyées' : ' programmée a été envoyée'} ✓`, 'success'), onChange()))
+      .then(n => n && (toast(`${n} envoi${n > 1 ? 's programmés ont été effectués' : ' programmé a été effectué'} ✓`, 'success'), onChange()))
       .catch(e => console.warn(e));
   };
   tick();

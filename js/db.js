@@ -191,6 +191,9 @@ export async function exportAll() {
         if (r.pdf instanceof Blob) r.pdf = { __b64: await blobToB64(r.pdf) };
       }
     }
+    if (name === 'assignments') {
+      for (const r of rows) for (const d of r.docs || []) if (d.blob instanceof Blob) d.blob = { __b64: await blobToB64(d.blob) };
+    }
     out.data[name] = rows;
   }
   return new Blob([JSON.stringify(out)], { type: 'application/json' });
@@ -203,6 +206,7 @@ export async function importAll(file, { replace = true } = {}) {
     if (replace) await clear(name);
     for (const r of json.data[name] || []) {
       if (r.pdf && r.pdf.__b64) r.pdf = b64ToBlob(r.pdf.__b64);
+      for (const d of r.docs || []) if (d.blob && d.blob.__b64) d.blob = b64ToBlob(d.blob.__b64, d.type || 'application/octet-stream');
       // la sauvegarde restaurée devient la version la plus récente (pour la synchronisation)
       r.updatedAt = Date.now();
       await putRaw(name, r);
