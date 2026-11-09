@@ -488,3 +488,30 @@ section.subject { margin: 18px 0; }
 .hw-status { list-style: none; padding: 0; margin: 8px 0; display: flex; flex-direction: column; gap: 6px; }
 .hw-status .tag { margin-left: 6px; }
 button.file-chip { cursor: pointer; font: inherit; border: none; }
+/* ---------- Poignée pour agrandir / réduire le panneau ---------- */
+.ed-panel { order: -2; }
+.ed-resizer { display: none; order: -1; flex: none; width: 14px; cursor: col-resize; touch-action: none; background: var(--surface-2); align-items: center; justify-content: center; }
+.ed-resizer span { display: block; width: 4px; height: 44px; border-radius: 4px; background: var(--muted); opacity: 0.55; }
+.ed-resizer.drag span, .ed-resizer:hover span { background: var(--brand); opacity: 1; }
+.editor.panel-open .ed-resizer { display: flex; }
+@media (max-width: 900px) and (orientation: landscape) { .editor.panel-open .ed-resizer { display: none; } }
+@media (max-width: 1100px) and (orientation: portrait) {
+  .ed-scroll { order: 0; }
+  .ed-resizer { order: 1; width: auto; height: 16px; cursor: row-resize; }
+  .ed-resizer span { width: 54px; height: 4px; }
+  .ed-panel { order: 2; }
+}
+/* Pas de document (oral, groupe…) : le panneau prend toute la place */
+.editor.no-doc .ed-scroll, .editor.no-doc .ed-resizer, .editor.no-doc .ed-tools, .editor.no-doc [data-act='panel'] { display: none !important; }
+.editor.no-doc .ed-panel { display: block; position: static; flex: 1; width: auto; height: auto; max-height: none; border: none; box-shadow: none; }
+.editor.no-doc .ed-panel > * { max-width: 860px; margin-left: auto; margin-right: auto; }
+.editor.no-doc #comment { min-height: 220px; }
+
+/* ---------- Participation individuelle et notes privées ---------- */
+.part-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
+.part-name { font-weight: 600; font-size: 0.92rem; min-width: 0; }
+.part-val { min-width: 52px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+.part-val.plus { color: var(--success); }
+.part-val.minus { color: var(--danger); }
+.private-sec { background: var(--surface-2); }
+.private-sec .input { background: var(--surface); }

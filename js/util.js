@@ -363,20 +363,25 @@ export function computeResult(grid, evaluation = {}) {
     const malus = appliedMalus(grid, evaluation);
     const minus = malus.reduce((t, m) => t + (+m.pts || 0), 0);
     for (const m of malus) lines.push({ label: m.label, value: `− ${fmtNum(+m.pts || 0)}`, malus: true });
+    // Participation individuelle (travail de groupe) : points en plus ou en moins pour un élève.
+    const part = +(evaluation && evaluation._part) || 0;
+    if (part) lines.push({ label: 'Participation individuelle', value: `${part > 0 ? '+' : '−'} ${fmtNum(Math.abs(part))}` });
     const rawTotal = total;
-    if (minus) {
-      if (scaled != null) scaled = Math.max(0, scaled - minus);
-      else total = Math.max(0, total - minus);
+    if (minus || part) {
+      const top = scaled != null ? +grid.scaleTo : max;
+      if (scaled != null) scaled = Math.min(top, Math.max(0, scaled - minus + part));
+      else total = Math.min(top, Math.max(0, total - minus + part));
     }
     const short = scaled != null ? `${fmtNum(scaled)}/${grid.scaleTo}` : `${fmtNum(total)}/${fmtNum(max)}`;
-    const detail = minus ? `${fmtNum(rawTotal)} / ${fmtNum(max)} points, malus − ${fmtNum(minus)}` : `${fmtNum(total)} / ${fmtNum(max)} points`;
+    const extras = [minus ? `malus − ${fmtNum(minus)}` : '', part ? `participation ${part > 0 ? '+' : '−'} ${fmtNum(Math.abs(part))}` : ''].filter(Boolean).join(', ');
+    const detail = extras ? `${fmtNum(rawTotal)} / ${fmtNum(max)} points, ${extras}` : `${fmtNum(total)} / ${fmtNum(max)} points`;
     const totalLine =
-      scaled != null && (max !== grid.scaleTo || minus)
+      scaled != null && (max !== grid.scaleTo || extras)
         ? `Note : ${fmtNum(scaled)} / ${grid.scaleTo} (${detail})`
         : scaled != null
         ? `Note : ${fmtNum(scaled)} / ${grid.scaleTo}`
-        : `Note : ${fmtNum(total)} / ${fmtNum(max)}${minus ? ` (malus − ${fmtNum(minus)})` : ''}`;
-    return { complete, total, max, scaled, short, lines, totalLine, minus };
+        : `Note : ${fmtNum(total)} / ${fmtNum(max)}${extras ? ` (${extras})` : ''}`;
+    return { complete, total, max, scaled, short, lines, totalLine, minus, part };
   } else {
     const levels = grid.levels && grid.levels.length ? grid.levels : DEFAULT_LEVELS;
     let complete = true,

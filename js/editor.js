@@ -60,7 +60,7 @@ export async function mountEditor(root, ctx) {
   const nextId = idx >= 0 && idx < ctx.order.length - 1 ? ctx.order[idx + 1] : null;
 
   root.innerHTML = `
-  <div class="editor ${st.panelOpen ? 'panel-open' : ''}">
+  <div class="editor ${st.panelOpen || !(copy.pdf instanceof Blob) ? 'panel-open' : ''} ${copy.pdf instanceof Blob ? '' : 'no-doc'}">
     <div class="ed-top">
       <button class="icon-btn" data-act="back" title="Retour au devoir">←</button>
       <div class="ed-title"><b>${esc(studentName(student))}</b><small>${esc(assignment.title)} · ${idx + 1}/${ctx.order.length}</small></div>
@@ -95,6 +95,7 @@ export async function mountEditor(root, ctx) {
     </div>
     <div class="ed-main">
       <div class="ed-scroll"><div class="ed-pages"><div class="loading">Chargement de la copie…</div></div></div>
+      <div class="ed-resizer" title="Glisser pour agrandir ou réduire le panneau"><span></span></div>
       <aside class="ed-panel"></aside>
     </div>
   </div>`;
@@ -103,6 +104,57 @@ export async function mountEditor(root, ctx) {
   const scroll = $('.ed-scroll', root);
   const pagesEl = $('.ed-pages', root);
   const panel = $('.ed-panel', root);
+
+  // ---------- Taille du panneau (poignée à glisser) ----------
+  const mainEl = $('.ed-main', root);
+  const resizer = $('.ed-resizer', root);
+  const portrait = () => window.matchMedia('(max-width: 1100px) and (orientation: portrait)').matches;
+  function applyPanelSize() {
+    const r = mainEl.getBoundingClientRect();
+    if (ed.classList.contains('no-doc')) {
+      panel.style.width = panel.style.height = panel.style.maxHeight = '';
+      return;
+    }
+    if (portrait()) {
+      panel.style.width = '';
+      if (prefs.panelH) {
+        panel.style.height = Math.round(Math.min(Math.max(prefs.panelH * r.height, 120), r.height - 120)) + 'px';
+        panel.style.maxHeight = 'none';
+      }
+    } else {
+      panel.style.height = panel.style.maxHeight = '';
+      if (prefs.panelW && r.width > 900) panel.style.width = Math.round(Math.min(Math.max(prefs.panelW * r.width, 260), r.width - 220)) + 'px';
+      else panel.style.width = '';
+    }
+  }
+  resizer.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    resizer.setPointerCapture(e.pointerId);
+    resizer.classList.add('drag');
+    const move = ev => {
+      const r = mainEl.getBoundingClientRect();
+      if (portrait()) prefs.panelH = Math.min(Math.max((r.bottom - ev.clientY) / r.height, 0.12), 0.88);
+      else prefs.panelW = Math.min(Math.max((ev.clientX - r.left) / r.width, 0.2), 0.85);
+      applyPanelSize();
+    };
+    const up = () => {
+      resizer.classList.remove('drag');
+      resizer.removeEventListener('pointermove', move);
+      resizer.removeEventListener('pointerup', up);
+      resizer.removeEventListener('pointercancel', up);
+      savePrefs();
+    };
+    resizer.addEventListener('pointermove', move);
+    resizer.addEventListener('pointerup', up);
+    resizer.addEventListener('pointercancel', up);
+  });
+  // double-toucher la poignée : taille d'origine
+  resizer.addEventListener('dblclick', () => {
+    delete prefs.panelW;
+    delete prefs.panelH;
+    savePrefs();
+    applyPanelSize();
+  });
 
   // ---------- Barre d'outils ----------
   // Les écouteurs posés sur `root` (partagé entre les copies) sont retirés quand on change de copie.
@@ -952,6 +1004,19 @@ export async function mountEditor(root, ctx) {
         .map(m => `<button class="lvl malus ${copy.evaluation[m.id] ? 'on' : ''}" data-p="malus" data-c="${m.id}">${esc(m.label)} − ${fmtNum(m.pts)}</button>`)
         .join('')}</div></div>`;
     }
+    // participation individuelle (travaux de groupe, grilles en points)
+    const partRow = (key, name, v) => `<div class="part-row"><span class="part-name">${esc(name)}</span><div class="stepper">
+        <button class="icon-btn" data-p="part" data-k="${key}" data-d="-0.5" title="Retirer un demi-point">−</button>
+        <span class="part-val ${v > 0 ? 'plus' : v < 0 ? 'minus' : ''}">${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtNum(Math.abs(v))}</span>
+        <button class="icon-btn" data-p="part" data-k="${key}" data-d="0.5" title="Ajouter un demi-point">+</button></div></div>`;
+    if (grid && grid.mode === 'note' && grid.criteria && grid.criteria.length) {
+      if (student.isGroup && (ctx.members || []).length)
+        gridHtml += `<div class="crit part-sec"><div class="crit-label">Participation individuelle</div>
+          <p class="muted small">Points en plus ou en moins pour chaque élève, ajoutés à la note du groupe sur sa propre fiche.</p>
+          ${ctx.members.map(m => partRow(m.id, m.name + (m.override ? ' (note individualisée)' : ''), m.part)).join('')}</div>`;
+      else if (ctx.groupMember)
+        gridHtml += `<div class="crit part-sec"><div class="crit-label">Participation individuelle</div>${partRow('self', 'Points en plus ou en moins', +copy.evaluation._part || 0)}</div>`;
+    }
     const fold = prefs.fold || {};
     const foldBtn = (key, title) =>
       `<button class="fold-btn" data-p="fold" data-k="${key}" aria-expanded="${!fold[key]}" title="${fold[key] ? 'Ouvrir' : 'Fermer'}"><span class="fold-arrow">▾</span><h3>${title}</h3></button>`;
@@ -962,6 +1027,19 @@ export async function mountEditor(root, ctx) {
           ${res.short ? `<span class="score ${res.complete ? '' : 'partial'}">${esc(res.short)}</span>` : ''}
         </div>
         <div class="fold-body">${gridHtml}</div>
+      </div>
+      <div class="panel-sec private-sec ${fold.notes ? 'folded' : ''}">
+        <div class="panel-head">
+          ${foldBtn('notes', '🔒 Questions et notes')}
+          ${fold.notes && (copy.privateNotes || '').trim() ? '<span class="muted small">✓ notes</span>' : ''}
+        </div>
+        <div class="fold-body">
+        <p class="muted small">Pour vous seulement : jamais envoyé à l'élève ni imprimé sur sa fiche.</p>
+        <div class="dictate-wrap">
+          <textarea class="input" id="privnotes" rows="4" placeholder="Questions à poser, remarques pendant l'oral…">${esc(copy.privateNotes || '')}</textarea>
+          <button class="mic" id="nmic" title="Dicter une note">🎙</button>
+        </div>
+        </div>
       </div>
       <div class="panel-sec ${fold.comment ? 'folded' : ''}">
         <div class="panel-head">
@@ -979,7 +1057,7 @@ export async function mountEditor(root, ctx) {
       <div class="panel-sec actions">
         <button class="btn ${copy.status === 'done' ? 'success' : 'primary'} block" data-p="done">${copy.status === 'done' ? '✓ Copie corrigée' : 'Marquer comme corrigée'}</button>
         ${nextId ? `<button class="btn block" data-p="next">Étudiant suivant →</button>` : ''}
-        ${copy.pdf ? `<button class="btn ghost block" data-p="adddoc">📎 Ajouter un document</button>` : ''}
+        ${copy.pdf ? `<button class="btn ghost block" data-p="adddoc">📎 Ajouter un document</button>` : `<button class="btn ghost block" data-p="adddoc">📎 Joindre un document</button>`}
         <button class="btn ghost block" data-p="pdf">⬇ Télécharger le PDF corrigé</button>
       </div>`;
     const ta = $('#comment', panel);
@@ -988,6 +1066,12 @@ export async function mountEditor(root, ctx) {
       changed();
     });
     attachDictation($('#cmic', panel), ta);
+    const nt = $('#privnotes', panel);
+    nt.addEventListener('input', () => {
+      copy.privateNotes = nt.value;
+      changed();
+    });
+    attachDictation($('#nmic', panel), nt);
     $$('input.num', panel).forEach(inp =>
       inp.addEventListener('change', () => {
         setScore(inp.dataset.c, parseNum(inp.value));
@@ -1007,6 +1091,22 @@ export async function mountEditor(root, ctx) {
     if (!b) return;
     const cid = b.dataset.c;
     switch (b.dataset.p) {
+      case 'part': {
+        const d = +b.dataset.d;
+        if (b.dataset.k === 'self') {
+          const v = Math.round(((+copy.evaluation._part || 0) + d) * 100) / 100;
+          if (v) copy.evaluation._part = v;
+          else delete copy.evaluation._part;
+          renderPanel();
+          changed();
+        } else {
+          const m = ctx.members.find(x => x.id === b.dataset.k);
+          m.part = Math.round((m.part + d) * 100) / 100;
+          renderPanel();
+          await ctx.setParticipation(m.id, m.part);
+        }
+        return;
+      }
       case 'malus':
         if (copy.evaluation[cid]) delete copy.evaluation[cid];
         else copy.evaluation[cid] = true;
@@ -1088,6 +1188,8 @@ export async function mountEditor(root, ctx) {
   });
 
   // ---------- Démarrage ----------
+  applyPanelSize();
+  window.addEventListener('resize', applyPanelSize, { signal: life.signal });
   renderToolbar();
   renderPanel();
   relayout();

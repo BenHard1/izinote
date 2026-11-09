@@ -35,8 +35,13 @@ const routes = [
   [/^reglages$/, settingsView],
 ];
 
+// Dernière page affichée : quand on réaffiche la même page (après une modification), on garde la position.
+let lastPath = null;
 async function router() {
   const path = location.hash.replace(/^#\/?/, '');
+  const samePage = path === lastPath;
+  const keepY = samePage ? window.scrollY : 0;
+  lastPath = path;
   if (cleanup) {
     const c = cleanup;
     cleanup = null;
@@ -59,7 +64,7 @@ async function router() {
         console.error(e);
         view.innerHTML = `<div class="page-wrap"><p class="error">Erreur : ${esc(e.message)}</p><a class="btn" href="#/">Retour à l'accueil</a></div>`;
       }
-      window.scrollTo(0, 0);
+      window.scrollTo(0, keepY);
       hideSplash();
       return;
     }
@@ -786,8 +791,12 @@ async function propagateGroup(a, gc) {
   for (const sid of g.studentIds) {
     const mc = copies.find(c => c.studentId === sid) || { assignmentId: a.id, studentId: sid };
     if (mc.override) continue;
+    // la participation individuelle de l'élève est gardée
+    const evaluation = JSON.parse(JSON.stringify(gc.evaluation || {}));
+    delete evaluation._part;
+    if (mc.evaluation && mc.evaluation._part) evaluation._part = mc.evaluation._part;
     Object.assign(mc, {
-      evaluation: JSON.parse(JSON.stringify(gc.evaluation || {})),
+      evaluation,
       comment: gc.comment || '',
       status: gc.status,
       correctedAt: gc.correctedAt,
@@ -1098,7 +1107,19 @@ async function correctView(assignmentId, studentId) {
   // copie de groupe : sert à savoir si un membre a été individualisé
   const memberGroup = !isGroupCopy && (a.groups || []).find(g => g.studentIds.includes(studentId));
   const groupCopy = memberGroup ? await getOrCreateCopy(assignmentId, 'g_' + memberGroup.id) : null;
-  const sig = c => JSON.stringify([c.evaluation || {}, c.comment || '', c.status || 'todo']);
+  // la participation individuelle (_part) ne rend pas la note « individualisée »
+  const sig = c => JSON.stringify([{ ...(c.evaluation || {}), _part: undefined }, c.comment || '', c.status || 'todo']);
+  // copie de groupe : points de participation de chaque membre
+  const members = [];
+  if (isGroupCopy) {
+    const copies = await db.by('copies', 'assignmentId', assignmentId);
+    for (const sid of group.studentIds) {
+      const st = students.find(x => x.id === sid);
+      if (!st) continue;
+      const mc = copies.find(c => c.studentId === sid);
+      members.push({ id: sid, name: studentName(st), part: +(mc && mc.evaluation && mc.evaluation._part) || 0, override: !!(mc && mc.override) });
+    }
+  }
   const initialSig = sig(copy);
   const ctx = {
     copy,
@@ -1107,6 +1128,15 @@ async function correctView(assignmentId, studentId) {
     cls,
     settings,
     kind: a.kind || 'devoir',
+    members,
+    groupMember: !!memberGroup,
+    setParticipation: async (sid, v) => {
+      const mc = await getOrCreateCopy(assignmentId, sid);
+      mc.evaluation = mc.evaluation || {};
+      if (v) mc.evaluation._part = v;
+      else delete mc.evaluation._part;
+      await db.put('copies', mc);
+    },
     order: isGroupCopy ? (a.groups || []).map(g => 'g_' + g.id) : students.map(x => x.id),
     exit: () => go('#/devoir/' + assignmentId),
     goto: sid => go(`#/corriger/${assignmentId}/${sid}`),
