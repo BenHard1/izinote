@@ -1200,6 +1200,21 @@ async function gridView(kind, id) {
         .join('')}</div>
       <button class="btn" id="addC">+ ${grid.mode === 'note' ? 'Critère' : 'Compétence'}</button>
       ${grid.mode === 'note' && grid.criteria.length ? `<p class="muted">Total : ${fmtNum(grid.criteria.reduce((t, c) => t + (+c.max || 0), 0))} points</p>` : ''}
+      ${
+        grid.mode === 'note'
+          ? `<h2>Malus <small>(facultatif)</small></h2>
+      <p class="muted small">Points retirés de la note finale${grid.scaleTo ? ' (sur ' + grid.scaleTo + ')' : ''} quand vous cochez le malus en corrigeant. Ex. « Excès d'IA » − 1, « Retard » − 2.</p>
+      <div id="maluses">${(grid.maluses || [])
+        .map(
+          (m, i) => `<div class="crit-edit">
+          <input class="input" data-mlabel="${i}" value="${esc(m.label)}" placeholder="Ex. Excès d'IA">
+          <span class="muted">−</span><input class="input num" data-mpts="${i}" inputmode="decimal" value="${fmtNum(m.pts)}" title="Points retirés"> <span class="muted">pt${+m.pts > 1 ? 's' : ''}</span>
+          <button class="icon-btn" data-mdel="${i}" title="Supprimer">✕</button></div>`
+        )
+        .join('')}</div>
+      <button class="btn" id="addM">+ Malus</button>`
+          : ''
+      }
       <div class="row wrap actions-bar">
         <button class="btn primary" id="save">Enregistrer</button>
         ${kind === 'devoir' ? `<button class="btn" id="load">Utiliser une grille modèle</button><button class="btn ghost" id="saveTpl">Enregistrer comme modèle</button>` : ''}
@@ -1211,6 +1226,8 @@ async function gridView(kind, id) {
     $$('[data-label]').forEach(i => (grid.criteria[+i.dataset.label].label = i.value));
     $$('[data-max]').forEach(i => (grid.criteria[+i.dataset.max].max = parseNum(i.value) ?? 0));
     $$('[data-lvl]').forEach(i => (grid.levels[+i.dataset.lvl] = i.value));
+    $$('[data-mlabel]').forEach(i => (grid.maluses[+i.dataset.mlabel].label = i.value));
+    $$('[data-mpts]').forEach(i => (grid.maluses[+i.dataset.mpts].pts = Math.abs(parseNum(i.value) ?? 0)));
     if ($('#scale')) grid.scaleTo = parseNum($('#scale').value);
     if ($('#gname')) owner.name = $('#gname').value.trim();
     if ($('#gsubject')) owner.subject = $('#gsubject').value.trim();
@@ -1288,6 +1305,15 @@ async function gridView(kind, id) {
       inputs[inputs.length - 1].focus();
     };
     $$('[data-del]').forEach(b => (b.onclick = () => (read(), grid.criteria.splice(+b.dataset.del, 1), render())));
+    if ($('#addM'))
+      $('#addM').onclick = () => {
+        read();
+        (grid.maluses = grid.maluses || []).push({ id: db.uid(), label: '', pts: 1 });
+        render();
+        const inputs = $$('[data-mlabel]');
+        inputs[inputs.length - 1].focus();
+      };
+    $$('[data-mdel]').forEach(b => (b.onclick = () => (read(), grid.maluses.splice(+b.dataset.mdel, 1), render())));
     $$('[data-up]').forEach(
       b =>
         (b.onclick = () => {
@@ -1302,6 +1328,7 @@ async function gridView(kind, id) {
     $('#save').onclick = async () => {
       read();
       grid.criteria = grid.criteria.filter(c => c.label.trim());
+      grid.maluses = (grid.maluses || []).filter(m => m.label.trim() && +m.pts);
       grid.levels = grid.levels.map(l => l.trim()).filter(Boolean);
       if (grid.mode === 'acquis' && grid.levels.length < 2) return toast('Il faut au moins 2 niveaux.', 'error');
       if (kind === 'devoir') {

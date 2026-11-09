@@ -13,7 +13,7 @@ Charte graphique : noir `#141414`, orange `#FF7828`, beige `#F5EDE0` · typograp
 - **Correction au stylet** : stylo (4 couleurs + vos couleurs avec « ＋ », 4 épaisseurs qui restent les mêmes à l'écran quand on zoome), tampons 🏷️ (✓, ✗, ★, « Très bien », « À revoir »… vos propres tampons texte, et des tampons image comme un logo, importés avec « ＋ Tampon » › « Importer une image » ; touchez un tampon posé pour l'agrandir, le réduire ou le supprimer), surligneur, texte, gomme, annuler/rétablir, zoom. Avec « Stylet seul », le doigt sert à défiler et à zoomer (pincer) sans laisser de trace.
 - **Commentaire oral** : bouton 🎙 pour dicter, retranscrit en texte (dictée gratuite de Chrome, il faut internet). Dites « virgule », « point » ou « à la ligne » pour la ponctuation.
 - **Grilles d'évaluation** propres à chaque devoir :
-  - *Notation* : critères avec un nombre de points, note ramenée sur 20 (ou autre) si vous le souhaitez ;
+  - *Notation* : critères avec un nombre de points, note ramenée sur 20 (ou autre) si vous le souhaitez, et des malus facultatifs (ex. « Excès d'IA » − 1) à cocher en corrigeant, retirés de la note finale ;
   - *Acquis / non acquis* : compétences avec des niveaux que vous choisissez (par défaut Non acquis / En cours d'acquisition / Acquis).
   - Les grilles modèles (« Grilles ») se réutilisent d'un devoir à l'autre.
 - **Envoi** : quand la classe est corrigée, l'appli le signale et propose d'envoyer. Chaque étudiant reçoit sur son e-mail son PDF corrigé (annotations + une page « Fiche d'évaluation » avec la grille et votre commentaire). L'envoi passe par votre Gmail dédié.

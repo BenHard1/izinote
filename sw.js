@@ -1,5 +1,5 @@
 // Service worker : l'appli fonctionne même sans connexion (sauf dictée et envoi des mails).
-const CACHE = 'izinote-v16';
+const CACHE = 'izinote-v17';
 const ASSETS = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/app.js', 'js/db.js', 'js/util.js', 'js/editor.js', 'js/pdfexport.js', 'js/gmail.js', 'js/reports.js', 'js/gridimport.js', 'js/convert.js', 'js/stamps.js', 'js/schedule.js', 'js/relayscript.js', 'js/distribute.js', 'js/sync.js',

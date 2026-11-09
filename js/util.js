@@ -338,6 +338,11 @@ export function newGrid(mode = 'note') {
   };
 }
 
+// Malus cochés pour une copie (evaluation[id du malus] = true).
+export function appliedMalus(grid, evaluation = {}) {
+  return ((grid && grid.mode === 'note' && grid.maluses) || []).filter(m => evaluation && evaluation[m.id]);
+}
+
 // Résultat d'une évaluation : { complete, total, max, scaled, text, short }
 export function computeResult(grid, evaluation = {}) {
   if (!grid || !grid.criteria || !grid.criteria.length) return { complete: true, short: '', lines: [] };
@@ -353,10 +358,25 @@ export function computeResult(grid, evaluation = {}) {
       else total += v;
       lines.push({ label: c.label, value: v == null ? '–' : `${fmtNum(v)} / ${fmtNum(c.max)}` });
     }
-    const scaled = grid.scaleTo && max ? (total / max) * grid.scaleTo : null;
+    let scaled = grid.scaleTo && max ? (total / max) * grid.scaleTo : null;
+    // Malus (ex. « Excès d'IA : −1 ») : retirés de la note finale (sur 20 si la note est ramenée sur 20).
+    const malus = appliedMalus(grid, evaluation);
+    const minus = malus.reduce((t, m) => t + (+m.pts || 0), 0);
+    for (const m of malus) lines.push({ label: m.label, value: `− ${fmtNum(+m.pts || 0)}`, malus: true });
+    const rawTotal = total;
+    if (minus) {
+      if (scaled != null) scaled = Math.max(0, scaled - minus);
+      else total = Math.max(0, total - minus);
+    }
     const short = scaled != null ? `${fmtNum(scaled)}/${grid.scaleTo}` : `${fmtNum(total)}/${fmtNum(max)}`;
-    const totalLine = scaled != null && max !== grid.scaleTo ? `Note : ${fmtNum(scaled)} / ${grid.scaleTo} (${fmtNum(total)} / ${fmtNum(max)} points)` : scaled != null ? `Note : ${fmtNum(scaled)} / ${grid.scaleTo}` : `Note : ${fmtNum(total)} / ${fmtNum(max)}`;
-    return { complete, total, max, scaled, short, lines, totalLine };
+    const detail = minus ? `${fmtNum(rawTotal)} / ${fmtNum(max)} points, malus − ${fmtNum(minus)}` : `${fmtNum(total)} / ${fmtNum(max)} points`;
+    const totalLine =
+      scaled != null && (max !== grid.scaleTo || minus)
+        ? `Note : ${fmtNum(scaled)} / ${grid.scaleTo} (${detail})`
+        : scaled != null
+        ? `Note : ${fmtNum(scaled)} / ${grid.scaleTo}`
+        : `Note : ${fmtNum(total)} / ${fmtNum(max)}${minus ? ` (malus − ${fmtNum(minus)})` : ''}`;
+    return { complete, total, max, scaled, short, lines, totalLine, minus };
   } else {
     const levels = grid.levels && grid.levels.length ? grid.levels : DEFAULT_LEVELS;
     let complete = true,
@@ -383,6 +403,7 @@ export function noteOn20(grid, evaluation = {}) {
   if (!grid || grid.mode !== 'note' || !grid.criteria || !grid.criteria.length) return null;
   const r = computeResult(grid, evaluation);
   if (!r.max || !Object.keys(evaluation || {}).some(k => grid.criteria.some(c => c.id === k))) return null;
+  if (r.scaled != null) return (r.scaled / grid.scaleTo) * 20;
   return (r.total / r.max) * 20;
 }
 

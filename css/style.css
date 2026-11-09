@@ -473,3 +473,7 @@ section.subject { margin: 18px 0; }
 @media (max-width: 1100px) and (orientation: portrait) {
   .ed-panel { order: 0; border-right: none; }
 }
+
+/* ---------- Malus ---------- */
+.malus-sec .crit-label { color: var(--danger); }
+.lvl.malus.on { background: var(--danger-soft); border-color: var(--danger); color: var(--danger); }

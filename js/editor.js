@@ -946,6 +946,12 @@ export async function mountEditor(root, ctx) {
         )
         .join('');
     }
+    // malus à cocher (grilles en points)
+    if (grid && grid.mode === 'note' && (grid.maluses || []).length) {
+      gridHtml += `<div class="crit malus-sec"><div class="crit-label">Malus</div><div class="levels">${grid.maluses
+        .map(m => `<button class="lvl malus ${copy.evaluation[m.id] ? 'on' : ''}" data-p="malus" data-c="${m.id}">${esc(m.label)} − ${fmtNum(m.pts)}</button>`)
+        .join('')}</div></div>`;
+    }
     const fold = prefs.fold || {};
     const foldBtn = (key, title) =>
       `<button class="fold-btn" data-p="fold" data-k="${key}" aria-expanded="${!fold[key]}" title="${fold[key] ? 'Ouvrir' : 'Fermer'}"><span class="fold-arrow">▾</span><h3>${title}</h3></button>`;
@@ -1001,6 +1007,12 @@ export async function mountEditor(root, ctx) {
     if (!b) return;
     const cid = b.dataset.c;
     switch (b.dataset.p) {
+      case 'malus':
+        if (copy.evaluation[cid]) delete copy.evaluation[cid];
+        else copy.evaluation[cid] = true;
+        renderPanel();
+        changed();
+        return;
       case 'fold': {
         // plier / déplier une partie du panneau (mémorisé d'une copie à l'autre)
         prefs.fold = { ...(prefs.fold || {}), [b.dataset.k]: !(prefs.fold || {})[b.dataset.k] };
