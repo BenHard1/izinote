@@ -1009,13 +1009,35 @@ export async function mountEditor(root, ctx) {
         <button class="icon-btn" data-p="part" data-k="${key}" data-d="-0.5" title="Retirer un demi-point">−</button>
         <span class="part-val ${v > 0 ? 'plus' : v < 0 ? 'minus' : ''}">${v > 0 ? '+' : v < 0 ? '−' : ''}${fmtNum(Math.abs(v))}</span>
         <button class="icon-btn" data-p="part" data-k="${key}" data-d="0.5" title="Ajouter un demi-point">+</button></div></div>`;
-    if (grid && grid.mode === 'note' && grid.criteria && grid.criteria.length) {
-      if (student.isGroup && (ctx.members || []).length)
-        gridHtml += `<div class="crit part-sec"><div class="crit-label">Participation individuelle</div>
-          <p class="muted small">Points en plus ou en moins pour chaque élève, ajoutés à la note du groupe sur sa propre fiche.</p>
-          ${ctx.members.map(m => partRow(m.id, m.name + (m.override ? ' (note individualisée)' : ''), m.part)).join('')}</div>`;
-      else if (ctx.groupMember)
+    const noteGrid = grid && grid.mode === 'note' && grid.criteria && grid.criteria.length;
+    const bonuses = (noteGrid && grid.bonuses) || [];
+    const bonusBtns = (key, ids) =>
+      bonuses.length
+        ? `<div class="levels bonus-list">${bonuses
+            .map(bn => `<button class="lvl bonus ${ids.includes(bn.id) ? 'on' : ''}" data-p="bonus" data-k="${key}" data-c="${bn.id}">${esc(bn.label)} + ${fmtNum(bn.pts)}</button>`)
+            .join('')}</div>`
+        : '';
+    if (student.isGroup && (ctx.members || []).length) {
+      // travail de groupe : pour chaque élève, bonus / participation et commentaire individuel
+      gridHtml += `<div class="crit member-sec"><div class="crit-label">Pour chaque élève</div>
+        <p class="muted small">Facultatif. Le bonus s'ajoute à la note du groupe, et le commentaire s'ajoute à la suite du commentaire du groupe, dans la fiche et le mail de cet élève seulement.</p>
+        ${ctx.members
+          .map(
+            m => `<div class="member-card">
+            ${noteGrid ? partRow(m.id, m.name + (m.override ? ' (note individualisée)' : ''), m.part) : `<div class="part-name">${esc(m.name)}</div>`}
+            ${bonusBtns(m.id, m.bonus)}
+            <textarea class="input member-comment" data-mc="${m.id}" rows="2" placeholder="Commentaire pour ${esc(m.first)} (facultatif)">${esc(m.comment)}</textarea>
+          </div>`
+          )
+          .join('')}</div>`;
+    } else if (!student.isGroup) {
+      if (bonuses.length) gridHtml += `<div class="crit bonus-sec"><div class="crit-label">Bonus</div>${bonusBtns('self', copy.evaluation._bonus || [])}</div>`;
+      if (ctx.groupMember && noteGrid)
         gridHtml += `<div class="crit part-sec"><div class="crit-label">Participation individuelle</div>${partRow('self', 'Points en plus ou en moins', +copy.evaluation._part || 0)}</div>`;
+      if (ctx.groupMember)
+        gridHtml += `<div class="crit part-sec"><div class="crit-label">Commentaire individuel</div>
+          <p class="muted small">Ajouté à la suite du commentaire du groupe, pour cet élève seulement.</p>
+          <textarea class="input member-comment" data-mc="self" rows="3" placeholder="Facultatif">${esc(copy.individualComment || '')}</textarea></div>`;
     }
     // absent / non rendu
     const mark = copy.evaluation._mark;
@@ -1077,6 +1099,26 @@ export async function mountEditor(root, ctx) {
       changed();
     });
     attachDictation($('#cmic', panel), ta);
+    // commentaires individuels (enregistrés un instant après la frappe)
+    $$('.member-comment', panel).forEach(t => {
+      let timer = null;
+      t.addEventListener('input', () => {
+        if (t.dataset.mc === 'self') {
+          copy.individualComment = t.value;
+          return changed();
+        }
+        const m = ctx.members.find(x => x.id === t.dataset.mc);
+        m.comment = t.value;
+        clearTimeout(timer);
+        timer = setTimeout(() => ctx.updateMember(m), 600);
+      });
+      t.addEventListener('blur', () => {
+        if (t.dataset.mc === 'self' || !timer) return;
+        clearTimeout(timer);
+        timer = null;
+        ctx.updateMember(ctx.members.find(x => x.id === t.dataset.mc));
+      });
+    });
     const nt = $('#privnotes', panel);
     nt.addEventListener('input', () => {
       copy.privateNotes = nt.value;
@@ -1114,7 +1156,23 @@ export async function mountEditor(root, ctx) {
           const m = ctx.members.find(x => x.id === b.dataset.k);
           m.part = Math.round((m.part + d) * 100) / 100;
           renderPanel();
-          await ctx.setParticipation(m.id, m.part);
+          await ctx.updateMember(m);
+        }
+        return;
+      }
+      case 'bonus': {
+        const toggle = list => (list.includes(cid) ? list.filter(x => x !== cid) : [...list, cid]);
+        if (b.dataset.k === 'self') {
+          const list = toggle(copy.evaluation._bonus || []);
+          if (list.length) copy.evaluation._bonus = list;
+          else delete copy.evaluation._bonus;
+          renderPanel();
+          changed();
+        } else {
+          const m = ctx.members.find(x => x.id === b.dataset.k);
+          m.bonus = toggle(m.bonus);
+          renderPanel();
+          await ctx.updateMember(m);
         }
         return;
       }

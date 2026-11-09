@@ -797,7 +797,9 @@ async function propagateGroup(a, gc) {
     // la participation individuelle de l'élève est gardée
     const evaluation = JSON.parse(JSON.stringify(gc.evaluation || {}));
     delete evaluation._part;
+    delete evaluation._bonus;
     if (mc.evaluation && mc.evaluation._part) evaluation._part = mc.evaluation._part;
+    if (mc.evaluation && mc.evaluation._bonus && mc.evaluation._bonus.length) evaluation._bonus = mc.evaluation._bonus;
     Object.assign(mc, {
       evaluation,
       comment: gc.comment || '',
@@ -1123,7 +1125,7 @@ async function correctView(assignmentId, studentId) {
   const memberGroup = !isGroupCopy && (a.groups || []).find(g => g.studentIds.includes(studentId));
   const groupCopy = memberGroup ? await getOrCreateCopy(assignmentId, 'g_' + memberGroup.id) : null;
   // la participation individuelle (_part) ne rend pas la note « individualisée »
-  const sig = c => JSON.stringify([{ ...(c.evaluation || {}), _part: undefined }, c.comment || '', c.status || 'todo']);
+  const sig = c => JSON.stringify([{ ...(c.evaluation || {}), _part: undefined, _bonus: undefined }, c.comment || '', c.status || 'todo']);
   // copie de groupe : points de participation de chaque membre
   const members = [];
   if (isGroupCopy) {
@@ -1132,7 +1134,8 @@ async function correctView(assignmentId, studentId) {
       const st = students.find(x => x.id === sid);
       if (!st) continue;
       const mc = copies.find(c => c.studentId === sid);
-      members.push({ id: sid, name: studentName(st), part: +(mc && mc.evaluation && mc.evaluation._part) || 0, override: !!(mc && mc.override) });
+      const ev = (mc && mc.evaluation) || {};
+      members.push({ id: sid, name: studentName(st), first: st.firstName || studentName(st), part: +ev._part || 0, bonus: [...(ev._bonus || [])], comment: (mc && mc.individualComment) || '', override: !!(mc && mc.override) });
     }
   }
   const initialSig = sig(copy);
@@ -1145,11 +1148,15 @@ async function correctView(assignmentId, studentId) {
     kind: a.kind || 'devoir',
     members,
     groupMember: !!memberGroup,
-    setParticipation: async (sid, v) => {
-      const mc = await getOrCreateCopy(assignmentId, sid);
+    // bonus, participation et commentaire individuel d'un membre du groupe
+    updateMember: async m => {
+      const mc = await getOrCreateCopy(assignmentId, m.id);
       mc.evaluation = mc.evaluation || {};
-      if (v) mc.evaluation._part = v;
+      if (m.part) mc.evaluation._part = m.part;
       else delete mc.evaluation._part;
+      if (m.bonus.length) mc.evaluation._bonus = [...m.bonus];
+      else delete mc.evaluation._bonus;
+      mc.individualComment = m.comment || '';
       await db.put('copies', mc);
     },
     order: isGroupCopy ? (a.groups || []).map(g => 'g_' + g.id) : students.map(x => x.id),
@@ -1266,7 +1273,18 @@ async function gridView(kind, id) {
           <button class="icon-btn" data-mdel="${i}" title="Supprimer">✕</button></div>`
         )
         .join('')}</div>
-      <button class="btn" id="addM">+ Malus</button>`
+      <button class="btn" id="addM">+ Malus</button>
+      <h2>Bonus <small>(facultatif)</small></h2>
+      <p class="muted small">Points ajoutés à la note finale quand vous cochez le bonus, pour un élève ou pour chaque membre d'un groupe. Ex. « Participation active » + 1.</p>
+      <div id="bonuses">${(grid.bonuses || [])
+        .map(
+          (m, i) => `<div class="crit-edit">
+          <input class="input" data-blabel="${i}" value="${esc(m.label)}" placeholder="Ex. Participation active">
+          <span class="muted">+</span><input class="input num" data-bpts="${i}" inputmode="decimal" value="${fmtNum(m.pts)}" title="Points ajoutés"> <span class="muted">pt${+m.pts > 1 ? 's' : ''}</span>
+          <button class="icon-btn" data-bdel="${i}" title="Supprimer">✕</button></div>`
+        )
+        .join('')}</div>
+      <button class="btn" id="addB">+ Bonus</button>`
           : ''
       }
       <div class="row wrap actions-bar">
@@ -1282,6 +1300,8 @@ async function gridView(kind, id) {
     $$('[data-lvl]').forEach(i => (grid.levels[+i.dataset.lvl] = i.value));
     $$('[data-mlabel]').forEach(i => (grid.maluses[+i.dataset.mlabel].label = i.value));
     $$('[data-mpts]').forEach(i => (grid.maluses[+i.dataset.mpts].pts = Math.abs(parseNum(i.value) ?? 0)));
+    $$('[data-blabel]').forEach(i => (grid.bonuses[+i.dataset.blabel].label = i.value));
+    $$('[data-bpts]').forEach(i => (grid.bonuses[+i.dataset.bpts].pts = Math.abs(parseNum(i.value) ?? 0)));
     if ($('#scale')) grid.scaleTo = parseNum($('#scale').value);
     if ($('#gname')) owner.name = $('#gname').value.trim();
     if ($('#gsubject')) owner.subject = $('#gsubject').value.trim();
@@ -1368,6 +1388,15 @@ async function gridView(kind, id) {
         inputs[inputs.length - 1].focus();
       };
     $$('[data-mdel]').forEach(b => (b.onclick = () => (read(), grid.maluses.splice(+b.dataset.mdel, 1), render())));
+    if ($('#addB'))
+      $('#addB').onclick = () => {
+        read();
+        (grid.bonuses = grid.bonuses || []).push({ id: db.uid(), label: '', pts: 1 });
+        render();
+        const inputs = $$('[data-blabel]');
+        inputs[inputs.length - 1].focus();
+      };
+    $$('[data-bdel]').forEach(b => (b.onclick = () => (read(), grid.bonuses.splice(+b.dataset.bdel, 1), render())));
     $$('[data-up]').forEach(
       b =>
         (b.onclick = () => {
@@ -1383,6 +1412,7 @@ async function gridView(kind, id) {
       read();
       grid.criteria = grid.criteria.filter(c => c.label.trim());
       grid.maluses = (grid.maluses || []).filter(m => m.label.trim() && +m.pts);
+      grid.bonuses = (grid.bonuses || []).filter(m => m.label.trim() && +m.pts);
       grid.levels = grid.levels.map(l => l.trim()).filter(Boolean);
       if (grid.mode === 'acquis' && grid.levels.length < 2) return toast('Il faut au moins 2 niveaux.', 'error');
       if (kind === 'devoir') {

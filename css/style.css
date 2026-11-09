@@ -521,3 +521,10 @@ button.file-chip { cursor: pointer; font: inherit; border: none; }
 .lvl.mark.on { background: var(--warn-soft); border-color: var(--warn); color: var(--warn); }
 .mark-note { margin: 6px 0; padding: 10px 12px; border-radius: 10px; background: var(--warn-soft); color: var(--warn); font-weight: 600; font-size: 0.92rem; }
 .list-search { margin-bottom: 8px; }
+
+/* ---------- Bonus et suivi par élève (groupes) ---------- */
+.lvl.bonus.on { background: var(--success-soft); border-color: var(--success); color: var(--success); }
+.bonus-sec .crit-label { color: var(--success); }
+.member-card { padding: 10px 0; border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: 8px; }
+.member-card:first-of-type { border-top: none; }
+.member-comment { min-height: 60px; }

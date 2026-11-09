@@ -7,7 +7,7 @@
 import * as db from './db.js';
 import * as gmail from './gmail.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
-import { computeResult, resultText, toast, esc } from './util.js';
+import { computeResult, resultText, toast, esc, fullComment } from './util.js';
 
 export function mailVars(a, cls, s, c, settings) {
   const r = computeResult(a.grid, c?.evaluation || {});
@@ -18,7 +18,7 @@ export function mailVars(a, cls, s, c, settings) {
     classe: cls ? cls.name : '',
     note: r.short || '',
     evaluation: resultText(a.grid, c?.evaluation || {}),
-    commentaire: (c?.comment || '').trim() || '—',
+    commentaire: fullComment(c) || '—',
     professeur: settings.teacherName || '',
   };
 }

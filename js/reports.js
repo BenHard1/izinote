@@ -1,6 +1,6 @@
 // Exports : tableau Excel des notes d'une classe, récapitulatif PDF d'un étudiant.
 import * as db from './db.js';
-import { computeResult, noteOn20, resultCell, studentName, dateOf, shortDate, kindLabel, loadScript, fmtNum, download, safeFileName } from './util.js';
+import { fullComment, computeResult, noteOn20, resultCell, studentName, dateOf, shortDate, kindLabel, loadScript, fmtNum, download, safeFileName } from './util.js';
 
 const { PDFDocument, StandardFonts, rgb, PageSizes } = window.PDFLib;
 
@@ -193,7 +193,7 @@ export async function studentRecapPdf(student, semesterId, semesterName) {
     });
     y -= h;
     page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.5, color: rgb(0.89, 0.84, 0.76) });
-    if (done && c.comment && c.comment.trim()) comments.push({ a, text: c.comment.trim() });
+    if (done && fullComment(c)) comments.push({ a, text: fullComment(c) });
     if (done && a.grid && a.grid.mode === 'acquis') comps.push({ a, r });
   }
   if (!assignments.length) text('Aucune évaluation sur cette période.', { color: grey });

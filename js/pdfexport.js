@@ -1,5 +1,5 @@
 // Fabrique le PDF corrigé : la copie d'origine + les annotations au stylet + une page « Fiche d'évaluation ».
-import { computeResult, studentName, fmtDate } from './util.js';
+import { computeResult, studentName, fmtDate, fullComment } from './util.js';
 import { drawStampPdf } from './stamps.js';
 
 const { PDFDocument, StandardFonts, rgb, LineCapStyle, PageSizes } = window.PDFLib;
@@ -210,11 +210,11 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
     y -= 10;
   }
 
-  if (copy.comment && copy.comment.trim()) {
+  if (fullComment(copy)) {
     y -= 6;
     text('Commentaire', { f: bold, size: 13 });
     y -= 2;
-    text(copy.comment.trim(), { size: 11.5, lh: 1.45 });
+    text(fullComment(copy), { size: 11.5, lh: 1.45 });
   }
 }
 

@@ -357,6 +357,15 @@ export function newGrid(mode = 'note') {
   };
 }
 
+// Bonus cochés pour une copie (evaluation._bonus = liste d'identifiants).
+export function appliedBonus(grid, evaluation = {}) {
+  const ids = (evaluation && evaluation._bonus) || [];
+  return ((grid && grid.mode === 'note' && grid.bonuses) || []).filter(b => ids.includes(b.id));
+}
+
+// Commentaire envoyé à l'élève : celui de la copie (ou du groupe), puis son commentaire individuel.
+export const fullComment = c => [c && c.comment, c && c.individualComment].map(x => (x || '').trim()).filter(Boolean).join('\n\n');
+
 // Malus cochés pour une copie (evaluation[id du malus] = true).
 export function appliedMalus(grid, evaluation = {}) {
   return ((grid && grid.mode === 'note' && grid.maluses) || []).filter(m => evaluation && evaluation[m.id]);
@@ -396,9 +405,12 @@ export function computeResult(grid, evaluation = {}) {
     const malus = appliedMalus(grid, evaluation);
     const minus = malus.reduce((t, m) => t + (+m.pts || 0), 0);
     for (const m of malus) lines.push({ label: m.label, value: `− ${fmtNum(+m.pts || 0)}`, malus: true });
-    // Participation individuelle (travail de groupe) : points en plus ou en moins pour un élève.
-    const part = +(evaluation && evaluation._part) || 0;
-    if (part) lines.push({ label: 'Participation individuelle', value: `${part > 0 ? '+' : '−'} ${fmtNum(Math.abs(part))}` });
+    // Bonus cochés (evaluation._bonus = ids) et participation individuelle (± points, travail de groupe).
+    const bonus = appliedBonus(grid, evaluation);
+    for (const bn of bonus) lines.push({ label: bn.label, value: `+ ${fmtNum(+bn.pts || 0)}`, bonus: true });
+    const partOnly = +(evaluation && evaluation._part) || 0;
+    if (partOnly) lines.push({ label: 'Participation individuelle', value: `${partOnly > 0 ? '+' : '−'} ${fmtNum(Math.abs(partOnly))}` });
+    const part = partOnly + bonus.reduce((t, bn) => t + (+bn.pts || 0), 0);
     const rawTotal = total;
     if (minus || part) {
       const top = scaled != null ? +grid.scaleTo : max;
@@ -406,7 +418,7 @@ export function computeResult(grid, evaluation = {}) {
       else total = Math.min(top, Math.max(0, total - minus + part));
     }
     const short = scaled != null ? `${fmtNum(scaled)}/${grid.scaleTo}` : `${fmtNum(total)}/${fmtNum(max)}`;
-    const extras = [minus ? `malus − ${fmtNum(minus)}` : '', part ? `participation ${part > 0 ? '+' : '−'} ${fmtNum(Math.abs(part))}` : ''].filter(Boolean).join(', ');
+    const extras = [minus ? `malus − ${fmtNum(minus)}` : '', part ? `bonus ${part > 0 ? '+' : '−'} ${fmtNum(Math.abs(part))}` : ''].filter(Boolean).join(', ');
     const detail = extras ? `${fmtNum(rawTotal)} / ${fmtNum(max)} points, ${extras}` : `${fmtNum(total)} / ${fmtNum(max)} points`;
     const totalLine =
       scaled != null && (max !== grid.scaleTo || extras)
