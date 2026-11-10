@@ -62,7 +62,12 @@ async function relayCall(st, payload) {
   try {
     res = await fetch(st.relayUrl, { method: 'POST', body: JSON.stringify({ secret: st.relaySecret, ...payload }), redirect: 'follow' });
   } catch {
-    throw new Error('Relais Google injoignable (connexion internet ? adresse du relais ?).');
+    // Apps Script ne renvoie pas les en-têtes CORS sur ses pages d'erreur : le navigateur n'y voit qu'une erreur réseau.
+    throw new Error(
+      navigator.onLine === false
+        ? 'Relais Google injoignable : pas de connexion internet.'
+        : 'Relais Google injoignable. Le plus souvent : le code du relais a été modifié sans relancer « installer » (▶ Exécuter, puis accepter les autorisations), ou le déploiement n’est pas en accès « Tout le monde », ou l’URL n’est pas celle finissant par /exec. Voir Réglages › Relais.'
+    );
   }
   let data = null;
   try {

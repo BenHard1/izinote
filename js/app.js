@@ -1566,7 +1566,8 @@ async function settingsView() {
       <label class="field"><span>URL du relais</span><input class="input" id="relayUrl" value="${esc(s.relayUrl || '')}" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" spellcheck="false"></label>
       <div class="row wrap"><button class="btn" id="relayTest">Tester le relais</button></div>
       <p class="muted small">Le relais garde les mails programmés dans votre Google Drive (dossier « IziNote – envois programmés ») et vérifie toutes les 5 minutes s’il y a des mails à envoyer. Un compte Gmail gratuit peut envoyer environ 100 mails par jour avec ce relais.</p>
-      <p class="muted small">Relais installé avant les rappels de devoirs ? Recopiez le code ci-dessus dans script.google.com, enregistrez, puis « Déployer › Gérer les déploiements › ✎ Modifier › Version : Nouvelle version › Déployer » (l’URL ne change pas).</p>
+      <p class="muted small">Relais installé avant les rappels de devoirs ? Recopiez le code ci-dessus dans script.google.com, enregistrez, puis <b>relancez la fonction installer</b> (▶ Exécuter, et acceptez les autorisations si Google les redemande), et enfin « Déployer › Gérer les déploiements › ✎ Modifier › Version : Nouvelle version › Déployer » (l’URL ne change pas).</p>
+      <p class="muted small">Message « Relais Google injoignable » ? Vérifiez dans cet ordre : 1) dans script.google.com, relancez <b>installer</b> et acceptez les autorisations ; 2) dans « Gérer les déploiements », l’accès est bien <b>Tout le monde</b> (pas « Tout utilisateur disposant d’un compte Google ») et la version est la dernière ; 3) l’URL collée ici est celle de l’application Web, finissant par <code>/exec</code> (pas <code>/dev</code>, ni l’adresse de l’éditeur).</p>
     </section>
 
     <section class="card-sec" id="syncSec">

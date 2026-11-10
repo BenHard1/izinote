@@ -65,7 +65,8 @@ function envoyerProgrammes() {
         (m.attachments || []).forEach(a => pj.push(Utilities.newBlob(Utilities.base64Decode(a.b64), a.type || 'application/octet-stream', a.name)));
         if (pj.length) opts.attachments = pj;
         // envoi groupé en copie cachée : le mail est adressé au compte lui-même
-        GmailApp.sendEmail(m.to || Session.getEffectiveUser().getEmail(), m.subject, m.body, opts);
+        // (adresse lue via Drive, déjà autorisé : pas de nouvelle autorisation à donner)
+        GmailApp.sendEmail(m.to || DriveApp.getRootFolder().getOwner().getEmail(), m.subject, m.body, opts);
         sous_('envoyes').createFile(m.id + '.txt', String(Date.now()));
         f.setTrashed(true);
       } catch (err) {
