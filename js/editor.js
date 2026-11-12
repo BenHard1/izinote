@@ -442,14 +442,18 @@ export async function mountEditor(root, ctx) {
   } else {
     const k = ctx.kind;
     pagesEl.innerHTML =
-      k === 'oral' || k === 'groupe'
+      k === 'controle'
+        ? `<div class="empty-copy"><div class="big-ico">📝</div>
+          <p><b>Évaluation écrite</b> : saisissez la note de ${esc(studentName(student))} dans le panneau. La copie papier est rendue en main propre ; l’envoi par mail est facultatif.</p>
+          <button class="btn" data-act2="import">Joindre la copie scannée (facultatif)</button></div>`
+        : k === 'oral' || k === 'groupe'
         ? `<div class="empty-copy"><div class="big-ico">${k === 'oral' ? '🎤' : '👥'}</div>
           <p><b>${k === 'oral' ? 'Évaluation orale' : 'Travail de groupe'}</b> : remplissez la grille et le commentaire à droite${student.isGroup ? ', ils seront reportés sur la fiche de chaque membre du groupe' : ''}.</p>
           <button class="btn" data-act2="import">Joindre un document PDF (facultatif)</button></div>`
         : `<div class="empty-copy"><p>Pas encore de copie PDF pour ${esc(studentName(student))}.</p>
       <button class="btn primary" data-act2="import">Importer le PDF</button>
       <p class="muted">Vous pouvez aussi remplir uniquement la grille et le commentaire.</p></div>`;
-    if (!st.panelOpen && (k === 'oral' || k === 'groupe')) {
+    if (!st.panelOpen && (k === 'oral' || k === 'groupe' || k === 'controle')) {
       st.panelOpen = true;
       ed.classList.add('panel-open');
     }
@@ -1088,7 +1092,7 @@ export async function mountEditor(root, ctx) {
         </div>
       </div>
       <div class="panel-sec actions">
-        <button class="btn ${copy.status === 'done' ? 'success' : 'primary'} block" data-p="done">${copy.status === 'done' ? '✓ Copie corrigée' : 'Marquer comme corrigée'}</button>
+        <button class="btn ${copy.status === 'done' ? 'success' : 'primary'} block" data-p="done">${ctx.kind === 'controle' ? (copy.status === 'done' ? '✓ Note validée' : 'Valider la note') : copy.status === 'done' ? '✓ Copie corrigée' : 'Marquer comme corrigée'}</button>
         ${nextId ? `<button class="btn block" data-p="next">Étudiant suivant →</button>` : ''}
         ${copy.pdf ? `<button class="btn ghost block" data-p="adddoc">📎 Ajouter un document</button>` : `<button class="btn ghost block" data-p="adddoc">📎 Joindre un document</button>`}
         <button class="btn ghost block" data-p="pdf">⬇ Télécharger le PDF corrigé</button>
@@ -1230,6 +1234,8 @@ export async function mountEditor(root, ctx) {
       case 'done': {
         if (copy.status !== 'done') {
           const r = computeResult(assignment.grid, copy.evaluation);
+          // évaluation écrite : la note est obligatoire (sauf « Absent » / « Non rendu », gérés à part)
+          if (ctx.kind === 'controle' && !r.complete) return toast('Saisissez la note avant de valider.', 'error');
           if (!r.complete) {
             const ok = await modal({
               title: 'Grille incomplète',
@@ -1243,7 +1249,7 @@ export async function mountEditor(root, ctx) {
           }
           copy.status = 'done';
           copy.correctedAt = Date.now();
-          toast('Copie marquée comme corrigée ✓', 'success');
+          toast(ctx.kind === 'controle' ? 'Note validée ✓' : 'Copie marquée comme corrigée ✓', 'success');
         } else {
           copy.status = 'todo';
         }

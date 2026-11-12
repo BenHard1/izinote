@@ -527,8 +527,15 @@ export const KINDS = [
   { value: 'projet', label: 'Projet (copie PDF)' },
   { value: 'oral', label: 'Oral (sans copie)' },
   { value: 'groupe', label: 'Travail de groupe' },
+  { value: 'controle', label: 'Évaluation écrite en cours (note directe, copie rendue en main propre)' },
 ];
-export const kindLabel = k => ({ devoir: 'Devoir', projet: 'Projet', oral: 'Oral', groupe: 'Travail de groupe' })[k] || 'Devoir';
+export const kindLabel = k => ({ devoir: 'Devoir', projet: 'Projet', oral: 'Oral', groupe: 'Travail de groupe', controle: 'Évaluation écrite' })[k] || 'Devoir';
+// Sans copie PDF obligatoire : on évalue directement
+export const noCopyKind = k => k === 'oral' || k === 'groupe' || k === 'controle';
+// Évaluation écrite en cours : pas besoin de construire une grille, une simple note sur 20 suffit (modifiable).
+export function noteGrid() {
+  return { ...newGrid('note'), scaleTo: null, criteria: [{ id: 'note', label: 'Note', max: 20 }] };
+}
 
 export function loadScript(src) {
   return new Promise((resolve, reject) => {

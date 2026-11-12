@@ -2,7 +2,7 @@ import * as db from './db.js';
 import {
   esc, $, $$, modal, form, toast, progressPill, confirmBox, confirmTyped, pickFiles, download, normalize, studentName,
   computeResult, resultText, newGrid, fmtNum, parseNum, fmtDate, DEFAULT_LEVELS,
-  KINDS, kindLabel, imageToDataUrl, dateOf, shortDate,
+  KINDS, kindLabel, noCopyKind, noteGrid, imageToDataUrl, dateOf, shortDate,
   busy,
 } from './util.js';
 import { mountEditor } from './editor.js';
@@ -435,7 +435,7 @@ async function classView(id) {
       { name: 'dueDate', label: 'Date (de rendu pour un devoir)', type: 'date', value: new Date().toISOString().slice(0, 10), help: 'Ensuite, sur la page du devoir : consignes, documents de travail, envoi aux élèves et rappels.' },
     ], 'Créer');
     if (!v) return;
-    const a = await db.put('assignments', { classId: id, semesterId: current.id, title: v.title, kind: v.kind, subject: v.subject, dueDate: v.dueDate, grid: newGrid('note'), groups: [], createdAt: Date.now() });
+    const a = await db.put('assignments', { classId: id, semesterId: current.id, title: v.title, kind: v.kind, subject: v.subject, dueDate: v.dueDate, grid: v.kind === 'controle' ? noteGrid() : newGrid('note'), groups: [], createdAt: Date.now() });
     go('#/devoir/' + a.id);
   };
   $('#xls').onclick = async () => {
@@ -619,7 +619,7 @@ async function studentView(id, semParam) {
 }
 
 function statusLabel(c, a) {
-  const noCopy = a && (a.kind === 'oral' || a.kind === 'groupe');
+  const noCopy = a && noCopyKind(a.kind);
   if (!c || (!c.pdf && c.status !== 'done')) return noCopy ? '<span class="tag todo">À évaluer</span>' : '<span class="tag">Pas de copie</span>';
   const mk = c.evaluation && c.evaluation._mark;
   if (mk === 'absent') return '<span class="tag">🚫 Absent</span>';
@@ -643,6 +643,7 @@ async function assignmentView(id) {
   const grid = a.grid || newGrid();
   const isGroup = a.kind === 'groupe';
   const isOral = a.kind === 'oral';
+  const isExam = a.kind === 'controle';
   const groups = a.groups || [];
   const groupOf = sid => groups.find(g => g.studentIds.includes(sid));
 
@@ -655,7 +656,7 @@ async function assignmentView(id) {
       <div class="li-side row">
         ${r && r.short && (c.status === 'done' || Object.keys(c.evaluation || {}).length) ? `<span class="score ${c.status === 'done' ? '' : 'partial'}">${esc(r.short)}</span>` : ''}
         ${isOral || isGroup ? '' : `<button class="icon-btn" data-up="${s.id}" title="${c && c.pdf ? 'Remplacer le PDF' : 'Importer le PDF'}">📎</button>`}
-        <a class="btn small ${c && c.status === 'done' ? '' : (c && c.pdf) || isOral ? 'primary' : ''}" href="#/corriger/${id}/${s.id}">${c && c.status === 'done' ? 'Revoir' : isOral || isGroup ? 'Évaluer' : 'Corriger'}</a>
+        <a class="btn small ${c && c.status === 'done' ? '' : (c && c.pdf) || isOral || isExam ? 'primary' : ''}" href="#/corriger/${id}/${s.id}">${c && c.status === 'done' ? 'Revoir' : isExam ? 'Noter' : isOral || isGroup ? 'Évaluer' : 'Corriger'}</a>
       </div></div>`;
   };
 
@@ -667,7 +668,7 @@ async function assignmentView(id) {
     ])}</div>
 
     <div class="summary">
-      <div class="sum-box"><b>${done}/${students.length}</b><span>${isOral || isGroup ? 'évalués' : 'corrigées'}</span></div>
+      <div class="sum-box"><b>${done}/${students.length}</b><span>${isOral || isGroup || isExam ? 'évalués' : 'corrigées'}</span></div>
       <div class="sum-box"><b>${sent}</b><span>envoyées</span></div>
       <div class="sum-box grow"><span>Grille : ${grid.criteria.length ? `${grid.mode === 'note' ? 'notation' + (grid.scaleTo ? ' sur ' + grid.scaleTo : '') : 'acquis / non acquis'}, ${grid.criteria.length} critère${grid.criteria.length > 1 ? 's' : ''}` : '<span class="warn">à créer</span>'}</span>
         <a class="btn small" href="#/grille/devoir/${id}">${grid.criteria.length ? 'Modifier la grille' : 'Créer la grille'}</a></div>
@@ -675,11 +676,11 @@ async function assignmentView(id) {
 
     ${hw.homeworkSection(a)}
 
-    ${allDone && sent < students.length ? `<div class="banner success">✓ Toute la classe est évaluée. Vous pouvez envoyer les résultats.</div>` : ''}
+    ${allDone && sent < students.length ? `<div class="banner success">✓ Toute la classe est évaluée.${isExam ? ' Les notes sont enregistrées (l’envoi par mail est facultatif).' : ' Vous pouvez envoyer les résultats.'}</div>` : ''}
 
     <div class="row wrap actions-bar">
-      ${isOral || isGroup ? '' : '<button class="btn" id="import">📄 Importer des copies (PDF)</button>'}
-      <button class="btn primary" id="send" ${done ? '' : 'disabled'}>✉ Envoyer ${isOral || isGroup ? 'les résultats' : 'les corrections'}</button>
+      ${isOral || isGroup ? '' : `<button class="btn" id="import">📄 Importer des copies (PDF${isExam ? ', facultatif' : ''})</button>`}
+      <button class="btn ${isExam ? '' : 'primary'}" id="send" ${done ? '' : 'disabled'}>✉ Envoyer ${isExam ? 'les notes (facultatif)' : isOral || isGroup ? 'les résultats' : 'les corrections'}</button>
       <button class="btn ghost" id="dlAll" ${done ? '' : 'disabled'}>⬇ Télécharger les fiches</button>
     </div>
 
@@ -736,6 +737,8 @@ async function assignmentView(id) {
     if (v) {
       const moved = v.dueDate !== a.dueDate;
       Object.assign(a, v);
+      // passage en « Évaluation écrite » sans grille : une simple note sur 20
+      if (a.kind === 'controle' && !(a.grid && a.grid.criteria && a.grid.criteria.length)) a.grid = noteGrid();
       // date de rendu changée : les rappels déjà programmés suivent
       if (moved && a.dueDate && a.handout) await hw.planMails(a, await db.getSettings()).catch(e => toast(e.message, 'error'));
       await db.put('assignments', a);

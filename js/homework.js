@@ -19,9 +19,13 @@ const sizeLabel = n => (n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' Ko' 
 
 export const REMINDERS = [
   { kind: 'j7', label: '1 semaine avant', days: 7 },
-  { kind: 'j0', label: 'le jour du rendu', days: 0 },
+  { kind: 'j1', label: 'la veille', days: 1 },
+  { kind: 'j0', label: 'le jour J', days: 0 },
 ];
-const KIND_LABEL = { send: 'Envoi du devoir', j7: 'Rappel 1 semaine avant', j0: 'Rappel le jour du rendu' };
+// Évaluation écrite en cours (contrôle) : les rappels annoncent le contrôle et ce qu'il faut réviser.
+export const isExam = a => a.kind === 'controle';
+const remLabel = (a, k) => (k === 'j0' ? (isExam(a) ? 'le jour du contrôle' : 'le jour du rendu') : REMINDERS.find(r => r.kind === k).label);
+const mailLabel = (a, k) => (k === 'send' ? (isExam(a) ? 'Annonce du contrôle' : 'Envoi du devoir') : 'Rappel ' + remLabel(a, k));
 
 const pad = n => String(n).padStart(2, '0');
 const longDate = ymd => new Date(ymd + 'T12:00:00').toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -38,7 +42,7 @@ const startOfDay = ts => {
 const dueStart = a => new Date(a.dueDate + 'T00:00:00').getTime();
 
 export const hasBrief = a => !!(a.brief || (a.docs && a.docs.length) || a.handout);
-const briefOf = a => ({ text: '', remind: ['j7', 'j0'], remindHour: '08:00', docsInReminders: true, ...(a.brief || {}) });
+const briefOf = a => ({ text: '', remind: isExam(a) ? ['j7', 'j1'] : ['j7', 'j0'], remindHour: '08:00', docsInReminders: true, ...(a.brief || {}) });
 
 export function reminderTime(a, kind) {
   const r = REMINDERS.find(x => x.kind === kind);
@@ -59,11 +63,23 @@ function whenText(a, at) {
 }
 
 export function defaultSubject(a) {
+  if (isExam(a)) return `Contrôle : ${a.title} – le ${longDate(a.dueDate)}`;
   return `${a.kind === 'projet' ? 'Projet' : 'Devoir'} : ${a.title} – à rendre le ${longDate(a.dueDate)}`;
 }
 export function defaultBody(a, settings) {
   const b = briefOf(a);
   const n = (a.docs || []).length;
+  if (isExam(a))
+    return [
+      'Bonjour à tous,',
+      `Le contrôle « ${a.title} » aura lieu le ${longDate(a.dueDate)}.`,
+      b.text ? `À réviser :\n${b.text}` : '',
+      n ? `Vous trouverez en pièce jointe le cours et les exercices à refaire.` : '',
+      'Vous recevrez un rappel par mail avant le contrôle.',
+      settings.teacherName ? `Bon courage,\n${settings.teacherName}` : 'Bon courage !',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
   return [
     'Bonjour à tous,',
     `Voici « ${a.title} », à rendre pour le ${longDate(a.dueDate)}.`,
@@ -78,6 +94,23 @@ export function defaultBody(a, settings) {
 function reminderMail(a, kind, at, settings) {
   const b = briefOf(a);
   const docs = b.docsInReminders ? a.docs || [] : [];
+  if (isExam(a)) {
+    const n = Math.round((dueStart(a) - startOfDay(at)) / DAY);
+    return {
+      subject: `Rappel : contrôle « ${a.title} » ${n <= 0 ? 'aujourd’hui' : n === 1 ? 'demain' : 'le ' + longDate(a.dueDate)}`,
+      body: [
+        'Bonjour à tous,',
+        `Petit rappel : le contrôle « ${a.title} » a lieu ${whenText(a, at)}.`,
+        b.text ? `À réviser :\n${b.text}` : '',
+        docs.length ? `Vous trouverez en pièce jointe le cours et les exercices à refaire.` : '',
+        'Bon courage pour vos révisions !',
+        settings.teacherName || '',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
+      docs,
+    };
+  }
   return {
     subject: `Rappel : « ${a.title} » à rendre ${kind === 'j0' ? 'aujourd’hui' : 'le ' + longDate(a.dueDate)}`,
     body: [
@@ -262,18 +295,23 @@ sched.registerSource({
 });
 
 // ---------- Affichage sur la page de l'évaluation ----------
-function mailLine(m) {
+const mailLine = a => m => `<li><b>${mailLabel(a, m.kind)}</b> ${mailTag(m)}</li>`;
+function mailTag(m) {
   const when = sched.fmtDateTime(m.sentAt || m.sendAt);
   let st;
   if (m.sentAt) st = `<span class="tag sent">✓ envoyé ${esc(sched.fmtDateTime(m.sentAt))}</span>`;
   else if (m.skipped) st = `<span class="tag">non envoyé (date dépassée)</span>`;
   else if (m.error) st = `<span class="tag err" title="${esc(m.error)}">échec : ${esc(m.error)}</span>`;
   else st = `<span class="tag sched">⏰ ${esc(when)}</span><small class="muted"> ${m.via === 'relay' ? '· par le relais Google' : '· depuis IziNote'}</small>`;
-  return `<li><b>${KIND_LABEL[m.kind]}</b> ${st}</li>`;
+  return st;
 }
 
 export function homeworkSection(a) {
   if (a.kind === 'oral' && !hasBrief(a)) return '';
+  const exam = isExam(a);
+  if (!hasBrief(a) && exam)
+    return `<div class="hw-box hw-empty"><div><b>📝 Contrôle à préparer</b><p class="muted small">Indiquez la date du contrôle, le cours à réviser et joignez le cours et les exercices à refaire : les élèves recevront un rappel une semaine avant et la veille.</p></div>
+      <button class="btn" id="hwEdit">Préparer les rappels</button></div>`;
   if (!hasBrief(a))
     return `<div class="hw-box hw-empty"><div><b>📌 Devoir à rendre</b><p class="muted small">Ajoutez la date de rendu, les consignes et les documents de travail, puis envoyez-les aux élèves avec des rappels automatiques (1 semaine avant et le jour J).</p></div>
       <button class="btn" id="hwEdit">Préparer le devoir</button></div>`;
@@ -281,15 +319,19 @@ export function homeworkSection(a) {
   const h = a.handout;
   const mails = (a.mails || []).filter(m => !(m.kind === 'send' && m.sentAt));
   const planned = pendingMails(a);
-  const remindTxt = b.remind.length ? `Rappels : ${b.remind.map(k => REMINDERS.find(r => r.kind === k).label).join(' et ')}, à ${hourLabel(b.remindHour)}` : 'Pas de rappel';
+  const remindTxt = b.remind.length ? `Rappels : ${b.remind.map(k => remLabel(a, k)).join(' et ')}, à ${hourLabel(b.remindHour)}` : 'Pas de rappel';
   return `<div class="hw-box">
-    <div class="hw-head"><div><b>📌 ${a.dueDate ? 'À rendre le ' + esc(longDate(a.dueDate)) : 'Date de rendu à choisir'}</b><small class="muted">${esc(remindTxt)}</small></div>
-      <div class="row wrap"><button class="btn small" id="hwEdit">✎ Modifier</button><button class="btn small ${h && h.sentAt ? '' : 'primary'}" id="hwSend">✉ ${h && h.sentAt ? 'Renvoyer' : 'Envoyer aux élèves'}</button></div></div>
+    <div class="hw-head"><div><b>${exam ? '📝 ' + (a.dueDate ? 'Contrôle le ' + esc(longDate(a.dueDate)) : 'Date du contrôle à choisir') : '📌 ' + (a.dueDate ? 'À rendre le ' + esc(longDate(a.dueDate)) : 'Date de rendu à choisir')}</b><small class="muted">${esc(remindTxt)}</small></div>
+      <div class="row wrap"><button class="btn small" id="hwEdit">✎ Modifier</button>${
+        exam
+          ? `<button class="btn small ${h ? '' : 'primary'}" id="hwSend">🔔 ${h ? 'Reprogrammer les rappels' : 'Programmer les rappels'}</button>`
+          : `<button class="btn small ${h && h.sentAt ? '' : 'primary'}" id="hwSend">✉ ${h && h.sentAt ? 'Renvoyer' : 'Envoyer aux élèves'}</button>`
+      }</div></div>
     ${b.text ? `<p class="hw-text">${esc(b.text)}</p>` : ''}
     ${(a.docs || []).length ? `<div class="file-chips">${a.docs.map(d => `<button type="button" class="chip file-chip" data-doc="${d.id}" title="Ouvrir">📄 ${esc(d.name)} <small>${sizeLabel(d.size || 0)}</small></button>`).join('')}</div>` : ''}
     <ul class="hw-status">
-      ${h && h.sentAt ? `<li><b>Devoir envoyé</b> <span class="tag sent">✓ ${esc(fmtDate(h.sentAt))} · ${h.count} élève${h.count > 1 ? 's' : ''}</span></li>` : !planned.some(m => m.kind === 'send') ? '<li class="muted">Pas encore envoyé aux élèves.</li>' : ''}
-      ${mails.map(mailLine).join('')}
+      ${exam ? (h && h.sentAt ? `<li><b>Annonce envoyée</b> <span class="tag sent">✓ ${esc(fmtDate(h.sentAt))} · ${h.count} élève${h.count > 1 ? 's' : ''}</span></li>` : !h ? '<li class="muted">Rappels pas encore programmés.</li>' : '') : h && h.sentAt ? `<li><b>Devoir envoyé</b> <span class="tag sent">✓ ${esc(fmtDate(h.sentAt))} · ${h.count} élève${h.count > 1 ? 's' : ''}</span></li>` : !planned.some(m => m.kind === 'send') ? '<li class="muted">Pas encore envoyé aux élèves.</li>' : ''}
+      ${mails.map(mailLine(a)).join('')}
     </ul>
     ${planned.length ? '<button type="button" class="linkbtn" id="hwCancel">Annuler les envois programmés</button>' : ''}
   </div>`;
@@ -327,18 +369,18 @@ export async function editBrief(a, students, refresh) {
   const b = briefOf(a);
   const docs = [...(a.docs || [])];
   const ok = await modal({
-    title: `Devoir à rendre – ${a.title}`,
+    title: `${isExam(a) ? 'Contrôle' : 'Devoir à rendre'} – ${a.title}`,
     wide: true,
     body: `
-      <label class="field"><span>Date de rendu</span><input class="input" type="date" id="hwDue" value="${esc(a.dueDate || '')}" style="max-width:220px"></label>
-      <label class="field"><span>Consignes <small class="muted">(reprises dans le mail aux élèves)</small></span><textarea class="input" id="hwText" rows="5" placeholder="Ex. Faire les exercices 1 à 4 page 52. Rendre un PDF ou une photo lisible.">${esc(b.text)}</textarea></label>
+      <label class="field"><span>${isExam(a) ? 'Date du contrôle' : 'Date de rendu'}</span><input class="input" type="date" id="hwDue" value="${esc(a.dueDate || '')}" style="max-width:220px"></label>
+      <label class="field"><span>${isExam(a) ? 'À réviser' : 'Consignes'} <small class="muted">(repris dans les mails aux élèves)</small></span><textarea class="input" id="hwText" rows="5" placeholder="${isExam(a) ? 'Ex. Chapitre 3 (les fonctions affines), refaire les exercices 2, 5 et 8 page 64.' : 'Ex. Faire les exercices 1 à 4 page 52. Rendre un PDF ou une photo lisible.'}">${esc(b.text)}</textarea></label>
       <div class="row wrap"><button type="button" class="btn small" id="hwMic">🎙 Dicter</button></div>
-      <div class="field"><span>Documents de travail</span>
+      <div class="field"><span>${isExam(a) ? 'Cours et exercices à refaire' : 'Documents de travail'}</span>
         <div id="hwFiles" class="file-chips"></div>
         <div class="row wrap"><button type="button" class="btn" id="hwAdd">📎 Ajouter des fichiers</button><span class="muted small" id="hwSize"></span></div>
       </div>
       <div class="field"><span>Rappels par mail aux élèves</span>
-        ${REMINDERS.map(r => `<label class="check"><input type="checkbox" data-rem="${r.kind}" ${b.remind.includes(r.kind) ? 'checked' : ''}> ${r.label}</label>`).join('')}
+        ${REMINDERS.map(r => `<label class="check"><input type="checkbox" data-rem="${r.kind}" ${b.remind.includes(r.kind) ? 'checked' : ''}> ${remLabel(a, r.kind)}</label>`).join('')}
         <label class="field inline"><span>à</span><input class="input" type="time" id="hwHour" value="${esc(b.remindHour)}" style="max-width:140px"></label>
         <label class="check"><input type="checkbox" id="hwDocsRem" ${b.docsInReminders ? 'checked' : ''}> Joindre de nouveau les documents aux rappels</label>
       </div>`,
@@ -378,7 +420,7 @@ export async function editBrief(a, students, refresh) {
   if (!ok) return;
   // les fichiers choisis deviennent des Blob simples (stockables dans IndexedDB)
   a.docs = docs.map(d => ({ ...d, blob: d.blob instanceof File ? new Blob([d.blob], { type: d.type }) : d.blob }));
-  if (a.handout && (a.handout.sentAt || pendingMails(a).length)) {
+  if (a.handout) {
     const b2 = busy('Mise à jour des rappels…');
     try {
       await planMails(a, await db.getSettings());
@@ -389,7 +431,7 @@ export async function editBrief(a, students, refresh) {
     }
   }
   await db.put('assignments', a);
-  toast('Devoir enregistré ✓', 'success');
+  toast(isExam(a) ? 'Contrôle enregistré ✓' : 'Devoir enregistré ✓', 'success');
   refresh();
 }
 
@@ -411,19 +453,23 @@ export async function sendDialog(a, students, refresh) {
     ? b.remind
         .map(k => {
           const t = reminderTime(a, k);
-          return `<li>${REMINDERS.find(r => r.kind === k).label} : <b>${esc(sched.fmtDateTime(t))}</b>${t <= Date.now() ? ' <small class="muted">(déjà passé, pas envoyé)</small>' : ''}</li>`;
+          return `<li>${remLabel(a, k)} : <b>${esc(sched.fmtDateTime(t))}</b>${t <= Date.now() ? ' <small class="muted">(déjà passé, pas envoyé)</small>' : ''}</li>`;
         })
         .join('')
     : '<li class="muted">Aucun rappel (modifiable avec « ✎ Modifier »).</li>';
 
+  const exam = isExam(a);
   await modal({
-    title: `Envoyer le devoir – ${a.title}`,
+    title: `${exam ? 'Rappels du contrôle' : 'Envoyer le devoir'} – ${a.title}`,
     wide: true,
     body: `
-      <p class="muted">Un seul mail, avec les élèves en <b>copie cachée</b>. Les rappels partent aux mêmes élèves.</p>
+      <p class="muted">${exam ? 'Les rappels partent aux élèves cochés, en <b>copie cachée</b>, avec ce qu’il faut réviser et les documents.' : 'Un seul mail, avec les élèves en <b>copie cachée</b>. Les rappels partent aux mêmes élèves.'}</p>
+      ${exam ? `<label class="check"><input type="checkbox" id="hsNow"> ✉ Envoyer aussi une annonce maintenant</label>` : ''}
+      <div id="hsAnn" ${exam ? 'hidden' : ''}>
       <label class="field"><span>Objet</span><input class="input" id="hsSubject" value="${esc(a.handout?.subject || defaultSubject(a))}"></label>
       <label class="field"><span>Message</span><textarea class="input" id="hsBody" rows="9">${esc(defaultBody(a, settings))}</textarea></label>
       <div class="row wrap"><button type="button" class="btn small" id="hsMic">🎙 Dicter</button></div>
+      </div>
       <div class="field"><span>Pièces jointes</span>${
         docs.length
           ? `<div class="file-chips">${docs.map(d => `<span class="chip file-chip">📄 ${esc(d.name)} <small>${sizeLabel(d.size || 0)}</small></span>`).join('')}</div>`
@@ -443,19 +489,25 @@ export async function sendDialog(a, students, refresh) {
             ? 'Ils partent de votre Gmail par le relais Google, même si la tablette est éteinte.'
             : 'Ils partent si IziNote est ouvert à ce moment-là, sinon à la prochaine ouverture. Pour qu’ils partent même tablette éteinte, activez le « relais d’envoi programmé » dans les Réglages.'
         }</p>
-        <label class="check"><input type="checkbox" id="schedOn"> ⏰ Programmer aussi l’envoi du devoir pour plus tard</label>
+        ${exam ? '' : `<label class="check"><input type="checkbox" id="schedOn"> ⏰ Programmer aussi l’envoi du devoir pour plus tard</label>`}
         <div id="schedFields" hidden><input class="input" type="datetime-local" id="schedAt" value="${toLocalInput(tomorrow)}"></div>
       </div>`,
-    actions: [{ label: 'Annuler', value: null }, { label: 'Envoyer', value: 'send', cls: 'primary' }],
+    actions: [{ label: 'Annuler', value: null }, { label: exam ? 'Programmer les rappels' : 'Envoyer', value: 'send', cls: 'primary' }],
     onOpen: (w, close) => {
       attachDictation($('#hsMic', w), $('#hsBody', w));
+      const nowBox = $('#hsNow', w);
+      if (nowBox)
+        nowBox.onchange = () => {
+          $('#hsAnn', w).hidden = !nowBox.checked;
+          $('.modal-actions .primary', w).textContent = nowBox.checked ? 'Envoyer et programmer' : 'Programmer les rappels';
+        };
       const count = () => ($('#hsCount', w).textContent = `(${$$('input[data-s]:checked', w).length} / ${withMail.length})`);
       count();
       w.addEventListener('change', e => e.target.matches('input[data-s]') && count());
       $('#hsAll', w).onclick = () => ($$('input[data-s]', w).forEach(i => (i.checked = true)), count());
       $('#hsNone', w).onclick = () => ($$('input[data-s]', w).forEach(i => (i.checked = false)), count());
       const sendBtn = $('.modal-actions .primary', w);
-      const schedOn = $('#schedOn', w);
+      const schedOn = $('#schedOn', w) || { checked: false };
       schedOn.onchange = () => {
         $('#schedFields', w).hidden = !schedOn.checked;
         sendBtn.textContent = schedOn.checked ? 'Programmer' : 'Envoyer';
@@ -468,6 +520,9 @@ export async function sendDialog(a, students, refresh) {
         if (!ids.length) return toast('Aucun destinataire coché.', 'error');
         if (docs.some(d => !(d.blob instanceof Blob))) return toast('Un document n’est pas encore arrivé sur cet appareil : attendez la synchronisation.', 'error');
         const later = schedOn.checked;
+        const announce = !exam || nowBox.checked; // contrôle : l'annonce immédiate est facultative
+        if (exam && !announce && !b.remind.some(k => reminderTime(a, k) > Date.now() + 60000))
+          return toast('Aucun rappel à venir : vérifiez la date du contrôle et les rappels cochés (« ✎ Modifier »).', 'error');
         let when = 0;
         if (later) {
           when = new Date($('#schedAt', w).value).getTime();
@@ -475,7 +530,7 @@ export async function sendDialog(a, students, refresh) {
           if (when < Date.now() + 60000) return toast('Choisissez un moment dans le futur.', 'error');
         }
         sendBtn.disabled = true;
-        if (!later) {
+        if (!later && announce) {
           try {
             await gmail.authorize(settings.googleClientId); // dans le clic : la fenêtre Google peut s'ouvrir
           } catch (e) {
@@ -483,11 +538,16 @@ export async function sendDialog(a, students, refresh) {
             return toast(e.message, 'error');
           }
         }
-        sendBtn.textContent = later ? 'Programmation…' : 'Envoi…';
+        const label0 = sendBtn.textContent;
+        sendBtn.textContent = later || !announce ? 'Programmation…' : 'Envoi…';
         try {
+          const prevSent = a.handout?.sentAt || null;
           a.handout = { recipients: ids, subject, body, sentAt: null, count: ids.length };
           if (later) {
             await planMails(a, settings, { sendAt: when });
+          } else if (!announce) {
+            if (a.handout && prevSent) a.handout.sentAt = prevSent;
+            await planMails(a, settings);
           } else {
             await sendNow(a, settings);
             await db.put('assignments', a); // le mail est parti : on l'enregistre avant de programmer les rappels
@@ -500,7 +560,9 @@ export async function sendDialog(a, students, refresh) {
           await db.put('assignments', a);
           const n = pendingMails(a).filter(m => m.kind !== 'send').length;
           toast(
-            `${later ? `Devoir programmé pour ${sched.fmtDateTime(when)}` : `Devoir envoyé à ${ids.length} élève${ids.length > 1 ? 's' : ''}`}${n ? ` · ${n} rappel${n > 1 ? 's' : ''} programmé${n > 1 ? 's' : ''}` : ''} ✓`,
+            !announce
+              ? `${n} rappel${n > 1 ? 's' : ''} programmé${n > 1 ? 's' : ''} pour ${ids.length} élève${ids.length > 1 ? 's' : ''} ✓`
+              : `${later ? `Devoir programmé pour ${sched.fmtDateTime(when)}` : `Devoir envoyé à ${ids.length} élève${ids.length > 1 ? 's' : ''}`}${n ? ` · ${n} rappel${n > 1 ? 's' : ''} programmé${n > 1 ? 's' : ''}` : ''} ✓`,
             'success'
           );
           close(true);
@@ -508,7 +570,7 @@ export async function sendDialog(a, students, refresh) {
           console.error(e);
           toast(e.message, 'error');
           sendBtn.disabled = false;
-          sendBtn.textContent = later ? 'Programmer' : 'Envoyer';
+          sendBtn.textContent = label0;
         }
       };
     },
