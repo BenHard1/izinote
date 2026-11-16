@@ -1,6 +1,7 @@
 // Fabrique le PDF corrigé : la copie d'origine + les annotations au stylet + une page « Fiche d'évaluation ».
 import { computeResult, studentName, fmtDate, fullComment } from './util.js';
 import { drawStampPdf } from './stamps.js';
+import { blocks } from './richtext.js';
 
 const { PDFDocument, StandardFonts, rgb, LineCapStyle, PageSizes } = window.PDFLib;
 
@@ -130,6 +131,8 @@ export async function buildCorrectedPdf({ copy, student, assignment, cls, settin
 async function addEvaluationPage(doc, { copy, student, assignment, cls, settings }) {
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const italic = await doc.embedFont(StandardFonts.HelveticaOblique);
+  const boldItalic = await doc.embedFont(StandardFonts.HelveticaBoldOblique);
   const safe = makeSafe(font);
   const [W, H] = PageSizes.A4;
   const M = 50;
@@ -170,6 +173,42 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
     for (const ln of wrapText(safe(s), f, size, maxW)) {
       ensure(size * lh);
       page.drawText(ln, { x, y: y - size, size, font: f, color });
+      y -= size * lh;
+    }
+  };
+
+  // Texte mis en forme (commentaire) : gras, italique, souligné, listes à puces et numérotées
+  const rich = (s, { size = 11.5, lh = 1.45, color = ink } = {}) => {
+    const fontOf = r => (r.b && r.i ? boldItalic : r.b ? bold : r.i ? italic : font);
+    for (const bl of blocks(s)) {
+      const indent = bl.kind === 'p' ? 0 : 18;
+      const words = [];
+      for (const r of bl.runs) for (const [k, w] of safe(r.t).split(/( +)/).entries()) if (w) words.push({ w, r, space: /^ +$/.test(w) });
+      ensure(size * lh);
+      if (bl.kind !== 'p') page.drawText(bl.kind === 'ol' ? bl.n + '.' : '•', { x: M + 4, y: y - size, size, font: bl.kind === 'ol' ? bold : font, color });
+      let x = M + indent;
+      const maxX = W - M;
+      const newLine = () => {
+        y -= size * lh;
+        ensure(size * lh);
+        x = M + indent;
+      };
+      if (!words.length) {
+        y -= size * lh;
+        continue;
+      }
+      for (const t of words) {
+        const f = fontOf(t.r);
+        const wd = f.widthOfTextAtSize(t.w, size);
+        if (t.space) {
+          if (x > M + indent) x += wd;
+          continue;
+        }
+        if (x + wd > maxX && x > M + indent) newLine();
+        page.drawText(t.w, { x, y: y - size, size, font: f, color });
+        if (t.r.u) page.drawLine({ start: { x, y: y - size - 1.5 }, end: { x: x + wd, y: y - size - 1.5 }, thickness: 0.7, color });
+        x += wd;
+      }
       y -= size * lh;
     }
   };
@@ -218,7 +257,7 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
     y -= 6;
     text('Commentaire', { f: bold, size: 13 });
     y -= 2;
-    text(fullComment(copy), { size: 11.5, lh: 1.45 });
+    rich(fullComment(copy), { size: 11.5, lh: 1.45 });
   }
 }
 

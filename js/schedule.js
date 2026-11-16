@@ -7,6 +7,7 @@
 import * as db from './db.js';
 import * as gmail from './gmail.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
+import { hasFormatting, toPlain, mailHtml } from './richtext.js';
 import { computeResult, resultText, toast, esc, fullComment, progressPill } from './util.js';
 
 export function mailVars(a, cls, s, c, settings) {
@@ -87,6 +88,9 @@ function bytesToB64(bytes) {
   return btoa(bin);
 }
 
+// Texte mis en forme : le relais reçoit le texte sans repères et la version HTML (un ancien relais n'envoie que le texte).
+const relayBody = body => (hasFormatting(body) ? { body: toPlain(body), htmlBody: mailHtml(body) } : { body });
+
 export async function relaySchedule(st, c, msg, sendAt) {
   await relayCall(st, {
     action: 'schedule',
@@ -95,7 +99,7 @@ export async function relaySchedule(st, c, msg, sendAt) {
       sendAt,
       to: msg.to,
       subject: msg.subject,
-      body: msg.body,
+      ...relayBody(msg.body),
       fromName: st.teacherName || '',
       fileName: msg.attachment.name,
       pdf: bytesToB64(msg.attachment.bytes),
@@ -119,6 +123,7 @@ export async function relayScheduleMail(st, mail) {
     action: 'schedule',
     mail: {
       ...mail,
+      ...relayBody(mail.body),
       fromName: st.teacherName || '',
       attachments: (mail.attachments || []).map(f => ({ name: f.name, type: f.type || 'application/octet-stream', b64: bytesToB64(f.bytes) })),
     },

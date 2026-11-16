@@ -5,7 +5,7 @@ export const relayScript = secret => `// IziNote – relais d'envoi programmé.
 // et les envoie depuis ce compte Gmail à l'heure prévue, même si la tablette est éteinte.
 const SECRET = '${secret}';
 const DOSSIER = 'IziNote – envois programmés';
-const VERSION = 2; // 2 : copie cachée et plusieurs pièces jointes (devoirs et rappels)
+const VERSION = 3; // 2 : copie cachée et plusieurs pièces jointes (devoirs et rappels) ; 3 : mails mis en forme (gras, listes)
 
 // 1) Exécutez cette fonction une fois (bouton ▶ Exécuter) et acceptez les autorisations.
 function installer() {
@@ -60,6 +60,7 @@ function envoyerProgrammes() {
         const opts = {};
         if (m.fromName) opts.name = m.fromName;
         if (m.bcc) opts.bcc = m.bcc;
+        if (m.htmlBody) opts.htmlBody = m.htmlBody;
         const pj = [];
         if (m.pdf) pj.push(Utilities.newBlob(Utilities.base64Decode(m.pdf), 'application/pdf', m.fileName || 'correction.pdf'));
         (m.attachments || []).forEach(a => pj.push(Utilities.newBlob(Utilities.base64Decode(a.b64), a.type || 'application/octet-stream', a.name)));

@@ -13,6 +13,7 @@ import { distributeDialog, mailingsSection } from './distribute.js';
 import * as hw from './homework.js';
 import { canListGrades, openGradeList } from './gradelist.js';
 import { wheelDialog } from './wheel.js';
+import { toPlain } from './richtext.js';
 import { relayScript } from './relayscript.js';
 import { classData, average, semesterOf, exportClassXlsx, studentRecapPdf } from './reports.js';
 import { readGridFile } from './gridimport.js';
@@ -597,7 +598,7 @@ async function studentView(id, semParam) {
           const g = groupName(a);
           return `<a class="list-item" href="#/corriger/${a.id}/${id}"><div class="li-main"><b>${esc(a.title)}</b>
             <small>${kindLabel(a.kind)}${g ? ' · ' + esc(g) : ''}${a.subject ? ' · ' + esc(a.subject) : ''} · ${esc(shortDate(dateOf(a)))} · ${statusLabel(c, a)}</small>
-            ${c && c.status === 'done' && c.comment ? `<small class="comment-snip">« ${esc(c.comment.slice(0, 140))}${c.comment.length > 140 ? '…' : ''} »</small>` : ''}</div>
+            ${c && c.status === 'done' && c.comment ? `<small class="comment-snip">« ${esc(toPlain(c.comment).slice(0, 140))}${c.comment.length > 140 ? '…' : ''} »</small>` : ''}</div>
             <div class="li-side">${r && r.short && c.status === 'done' ? `<span class="score">${esc(r.short)}</span>` : ''}</div></a>`;
         })
         .join('') || '<p class="muted" style="padding:14px">Aucune évaluation sur cette période.</p>'

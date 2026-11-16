@@ -1,5 +1,6 @@
 // Écran de correction : affichage du PDF, annotation au stylet, grille, commentaire (écrit ou dicté).
 import { esc, $, $$, modal, toast, attachDictation, speechSupported, computeResult, fmtNum, parseNum, studentName, download, pickFiles, imageToDataUrl, gridSections, hasParts } from './util.js';
+import { attachTextTools } from './richtext.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
 import { BUILTIN_STAMPS, STAMP_SIZES, IMAGE_SCALE, drawStampCanvas, stampBoxCss, preloadImage } from './stamps.js';
 
@@ -1114,8 +1115,10 @@ export async function mountEditor(root, ctx) {
       changed();
     });
     attachDictation($('#cmic', panel), ta);
+    attachTextTools(ta);
     // commentaires individuels (enregistrés un instant après la frappe)
     $$('.member-comment', panel).forEach(t => {
+      attachTextTools(t);
       let timer = null;
       t.addEventListener('input', () => {
         if (t.dataset.mc === 'self') {

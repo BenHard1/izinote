@@ -3,6 +3,8 @@
 
 // gmail.send : envoyer les mails ; drive.appdata : dossier caché de l'appli dans le Drive (synchronisation).
 // L'appli ne voit que ses propres fichiers, pas le reste du Drive.
+import { hasFormatting, toPlain, mailHtml } from './richtext.js';
+
 const SCOPE = 'https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/drive.appdata';
 let gisLoaded = null;
 let token = null;
@@ -82,6 +84,9 @@ function bytesToB64(bytes) {
 export function buildMime({ to, bcc, subject, body, attachment, attachments }) {
   const boundary = 'part_' + Math.random().toString(36).slice(2);
   const files = attachments || (attachment ? [attachment] : []);
+  // texte mis en forme (gras, listes…) : une version HTML et une version texte sans repères
+  const rich = hasFormatting(body);
+  const alt = 'alt_' + Math.random().toString(36).slice(2);
   const lines = [
     ...(to ? [`To: ${to}`] : []),
     ...(bcc ? [`Bcc: ${bcc}`] : []),
@@ -90,10 +95,23 @@ export function buildMime({ to, bcc, subject, body, attachment, attachments }) {
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
     '',
     `--${boundary}`,
-    'Content-Type: text/plain; charset="UTF-8"',
-    'Content-Transfer-Encoding: base64',
-    '',
-    wrap76(b64(body)),
+    ...(rich
+      ? [
+          `Content-Type: multipart/alternative; boundary="${alt}"`,
+          '',
+          `--${alt}`,
+          'Content-Type: text/plain; charset="UTF-8"',
+          'Content-Transfer-Encoding: base64',
+          '',
+          wrap76(b64(toPlain(body))),
+          `--${alt}`,
+          'Content-Type: text/html; charset="UTF-8"',
+          'Content-Transfer-Encoding: base64',
+          '',
+          wrap76(b64(mailHtml(body))),
+          `--${alt}--`,
+        ]
+      : ['Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', wrap76(b64(body))]),
   ];
   for (const f of files) {
     lines.push(

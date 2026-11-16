@@ -4,6 +4,7 @@
 import * as db from './db.js';
 import * as gmail from './gmail.js';
 import { esc, $, $$, modal, toast, pickFiles, attachDictation, studentName, fmtDate } from './util.js';
+import { attachTextTools } from './richtext.js';
 
 const MAX_MB = 24; // limite Gmail : 25 Mo par mail, encodage compris
 const sizeMb = n => (n < 1048576 ? Math.max(1, Math.round(n / 1024)) + ' Ko' : (n / 1048576).toFixed(1).replace('.', ',') + ' Mo');
@@ -41,6 +42,7 @@ export async function distributeDialog(cls, students, onDone) {
     actions: [{ label: 'Annuler', value: null }, { label: 'Envoyer', value: 'send', cls: 'primary' }],
     onOpen: (w, close) => {
       attachDictation($('#dMic', w), $('#dBody', w));
+      attachTextTools($('#dBody', w));
       const count = () => ($('#dCount', w).textContent = `(${$$('input[data-s]:checked', w).length} / ${withMail.length})`);
       count();
       w.addEventListener('change', e => e.target.matches('input[data-s]') && count());

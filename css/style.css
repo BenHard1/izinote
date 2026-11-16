@@ -592,3 +592,20 @@ button.file-chip { cursor: pointer; font: inherit; border: none; }
 .wheel-order li { padding: 2px 0; }
 .pass-order { margin: 4px 0 8px; }
 .wheel-side .btn { max-width: 100%; white-space: normal; text-align: left; }
+
+/* Mise en forme et correcteur */
+.fmt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 4px 0; }
+.fmt-bar button { min-width: 36px; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 0.9rem; cursor: pointer; }
+.fmt-bar button:active { background: var(--primary-soft); }
+.fmt-sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px; }
+.fmt-auto { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8rem; color: var(--muted); }
+.fmt-auto input { width: 18px; height: 18px; accent-color: var(--primary); }
+.fmt-below:empty { display: none; }
+.spell-box { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0 0; }
+.spell-box:empty { display: none; }
+.spell-fix { border: 1px solid var(--warn); background: var(--warn-soft); color: var(--text); border-radius: 99px; padding: 3px 10px; font: inherit; font-size: 0.85rem; cursor: pointer; }
+.spell-fix s { color: var(--danger); }
+.spell-ok { color: var(--success); }
+.fmt-preview { margin-top: 6px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); font-size: 0.92rem; }
+.fmt-preview ul, .fmt-preview ol, .hw-text ul, .hw-text ol, .hs-prev ul, .hs-prev ol { margin: 4px 0; padding-left: 24px; }
+.hs-prev #hsPrev { white-space: normal; }

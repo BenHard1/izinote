@@ -15,6 +15,7 @@
 import * as db from './db.js';
 import * as gmail from './gmail.js';
 import * as sched from './schedule.js';
+import { attachTextTools, toHtml } from './richtext.js';
 import { esc, $, $$, modal, toast, pickFiles, attachDictation, studentName, download, confirmBox, fmtDate, busy } from './util.js';
 
 const MAX_MB = 24; // limite Gmail : 25 Mo par mail, encodage compris
@@ -439,7 +440,7 @@ export function homeworkSection(a) {
           ? `<button class="btn small ${h ? '' : 'primary'}" id="hwSend">🔔 ${h ? 'Reprogrammer les rappels' : 'Programmer les rappels'}</button>`
           : `<button class="btn small ${h && h.sentAt ? '' : 'primary'}" id="hwSend">✉ ${h && h.sentAt ? 'Renvoyer' : 'Envoyer aux élèves'}</button>`
       }</div></div>
-    ${b.text ? `<p class="hw-text">${esc(b.text)}</p>` : ''}
+    ${b.text ? `<div class="hw-text">${toHtml(b.text)}</div>` : ''}
     ${(a.docs || []).length ? `<div class="file-chips">${a.docs.map(d => `<button type="button" class="chip file-chip" data-doc="${d.id}" title="Ouvrir">📄 ${esc(d.name)} <small>${sizeLabel(d.size || 0)}</small></button>`).join('')}</div>` : ''}
     <ul class="hw-status">
       ${exam ? (h && h.sentAt ? `<li><b>Annonce envoyée</b> <span class="tag sent">✓ ${esc(fmtDate(h.sentAt))} · ${h.count} élève${h.count > 1 ? 's' : ''}</span></li>` : !h ? '<li class="muted">Rappels pas encore programmés.</li>' : '') : h && h.sentAt ? `<li><b>${a.kind === 'oral' || a.kind === 'groupe' ? 'Consignes envoyées' : 'Devoir envoyé'}</b> <span class="tag sent">✓ ${esc(fmtDate(h.sentAt))} · ${h.count} élève${h.count > 1 ? 's' : ''}${h.mode === 'individual' ? ' · un mail chacun' : ''}</span></li>` : !planned.some(m => m.kind === 'send') ? '<li class="muted">Pas encore envoyé aux élèves.</li>' : ''}
@@ -513,7 +514,9 @@ export async function editBrief(a, students, refresh) {
     actions: [{ label: 'Annuler', value: null }, { label: 'Enregistrer', value: 'save', cls: 'primary' }],
     onOpen: w => {
       attachDictation($('#hwMic', w), $('#hwText', w));
+      attachTextTools($('#hwText', w));
       $$('[data-gmic]', w).forEach(btn => attachDictation(btn, $(`[data-gtext="${btn.dataset.gmic}"]`, w)));
+      $$('[data-gtext]', w).forEach(t => attachTextTools(t));
       const render = () => {
         $('#hwFiles', w).innerHTML = docs
           .map((d, i) => `<span class="chip file-chip">📄 ${esc(d.name)} <small>${sizeLabel(d.size)}</small><button type="button" class="linkbtn" data-rm="${i}" title="Retirer">✕</button></span>`)
@@ -614,7 +617,7 @@ export async function sendDialog(a, students, refresh) {
       <div class="row wrap"><button type="button" class="btn small" id="hsMic">🎙 Dicter</button></div>
       <div id="hsIndiv" hidden>
         <p class="muted small">Remplacés pour chaque élève : {prenom} {nom}${a.kind === 'groupe' ? ' {groupe} {membres} {groupe_info} {consignes_groupe}' : ''}</p>
-        <div class="hs-prev"><small class="muted" id="hsPrevWho"></small><pre id="hsPrev"></pre></div>
+        <div class="hs-prev"><small class="muted" id="hsPrevWho"></small><div id="hsPrev"></div></div>
       </div>
       </div>
       <div class="field"><span>Pièces jointes</span>${
@@ -642,6 +645,7 @@ export async function sendDialog(a, students, refresh) {
     actions: [{ label: 'Annuler', value: null }, { label: exam ? 'Programmer les rappels' : 'Envoyer', value: 'send', cls: 'primary' }],
     onOpen: (w, close) => {
       attachDictation($('#hsMic', w), $('#hsBody', w));
+      attachTextTools($('#hsBody', w));
       const modeOf = () => ($('input[name=hsMode]:checked', w) || {}).value || 'group';
       let mode = modeOf();
       // aperçu du mail du premier élève coché
@@ -657,7 +661,7 @@ export async function sendDialog(a, students, refresh) {
         }
         const v = studentVars(a, s, students);
         $('#hsPrevWho', w).textContent = `Aperçu pour ${studentName(s)} :`;
-        $('#hsPrev', w).textContent = `Objet : ${fillStudent($('#hsSubject', w).value, v)}\n\n${fillStudent($('#hsBody', w).value, v)}`;
+        $('#hsPrev', w).innerHTML = `${esc(`Objet : ${fillStudent($('#hsSubject', w).value, v)}`)}<br><br>${toHtml(fillStudent($('#hsBody', w).value, v))}`;
       };
       $$('input[name=hsMode]', w).forEach(r =>
         r.addEventListener('change', () => {
