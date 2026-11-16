@@ -666,6 +666,7 @@ async function assignmentView(id) {
     ${crumbs([...(await chain({ cls })), { label: a.title }])}
     <div class="page-head"><div><h1>${esc(a.title)}</h1><p class="muted" style="margin:4px 0 0">${kindLabel(a.kind)}${a.subject ? ' · ' + esc(a.subject) : ''} · ${esc(shortDate(dateOf(a)))}</p></div>${menuButton([
       { label: 'Modifier (titre, type, matière, date)', act: 'rename' },
+      { label: 'Copier dans une autre classe', act: 'copy' },
       { label: 'Supprimer cette évaluation', act: 'delete', danger: true },
     ])}</div>
 
@@ -760,6 +761,7 @@ async function assignmentView(id) {
       router();
     }
   };
+  view.querySelector('[data-act=copy]').onclick = () => copyToClasses(a, cls);
   view.querySelector('[data-act=delete]').onclick = async () => {
     if (await confirmTyped('Supprimer l’évaluation', 'Toutes les copies et évaluations liées seront supprimées.', a.title)) {
       await hw.cancelPending(a).catch(e => console.warn(e)); // devoir et rappels pas encore partis
@@ -767,6 +769,57 @@ async function assignmentView(id) {
       go('#/classe/' + cls.id);
     }
   };
+}
+
+// Copie d'une évaluation dans d'autres classes : titre, type, matière, date, grille, consignes, documents
+// et rappels choisis. Ni les copies, ni les notes, ni les groupes, ni les envois ne sont copiés.
+async function copyToClasses(a, cls) {
+  const schools = (await db.all('schools')).sort(db.sortByName);
+  const classes = (await db.all('classes')).filter(c => c.id !== cls.id).sort(db.sortByName);
+  if (!classes.length) return toast('Aucune autre classe : créez-la d’abord.', 'error');
+  let chosen = null;
+  const bySchool = [...schools.map(sc => [sc, classes.filter(c => c.schoolId === sc.id)]), [{ name: 'Autres' }, classes.filter(c => !schools.some(sc => sc.id === c.schoolId))]].filter(([, l]) => l.length);
+  const ok = await modal({
+    title: `Copier « ${a.title} »`,
+    body: `<p class="muted small">L’évaluation est copiée avec sa grille${a.brief || (a.docs || []).length ? ', ses consignes, ses documents et ses rappels' : ''}. Les notes, copies, groupes et envois restent dans la classe d’origine.</p>
+      ${bySchool
+        .map(([sc, list]) => `<div class="field"><span>${esc(sc.name)}</span><div class="send-list">${list.map(c => `<label class="send-row"><input type="checkbox" value="${c.id}"><span class="sr-name">${esc(c.name)}</span></label>`).join('')}</div></div>`)
+        .join('')}
+      <label class="field"><span>Date ${a.kind === 'controle' ? 'du contrôle' : a.kind === 'devoir' || a.kind === 'projet' ? 'de rendu' : ''} dans la nouvelle classe</span><input class="input" type="date" id="cpDate" value="${esc(a.dueDate || '')}" style="max-width:220px"></label>`,
+    actions: [{ label: 'Annuler', value: false }, { label: 'Copier', value: true, cls: 'primary' }],
+    validate: (v, w) => {
+      chosen = { ids: $$('input[type=checkbox]:checked', w).map(i => i.value), date: $('#cpDate', w).value };
+      if (!chosen.ids.length) return toast('Cochez au moins une classe.', 'error'), false;
+      return true;
+    },
+  });
+  if (!ok) return;
+  const made = [];
+  for (const cid of chosen.ids) {
+    const target = classes.find(c => c.id === cid);
+    const sem = await ensureSemesters(target);
+    const copy = {
+      classId: cid,
+      semesterId: sem.id,
+      title: a.title,
+      kind: a.kind,
+      subject: a.subject || '',
+      dueDate: chosen.date || a.dueDate || '',
+      grid: JSON.parse(JSON.stringify(a.grid || newGrid())),
+      groups: [],
+      createdAt: Date.now(),
+    };
+    if (a.brief) {
+      copy.brief = JSON.parse(JSON.stringify(a.brief));
+      delete copy.brief.groupText; // les groupes de l'autre classe ne sont pas les mêmes
+    }
+    if ((a.docs || []).length) copy.docs = a.docs.map(d => ({ ...d, id: db.uid() }));
+    made.push([target, await db.put('assignments', copy)]);
+  }
+  if (made.length === 1) {
+    toast(`Copié dans ${made[0][0].name} ✓`, 'success');
+    go('#/devoir/' + made[0][1].id);
+  } else toast(`Copié dans ${made.length} classes : ${made.map(([c]) => c.name).join(', ')} ✓`, 'success');
 }
 
 async function editGroup(a, students, g) {
