@@ -568,3 +568,27 @@ button.file-chip { cursor: pointer; font: inherit; border: none; }
 .hw-group .btn { align-self: flex-start; }
 .hs-prev { margin-top: 6px; padding: 10px 12px; border: 1px dashed var(--line); border-radius: 10px; background: var(--surface-2); }
 .hs-prev pre { margin: 4px 0 0; white-space: pre-wrap; font: inherit; font-size: 0.9rem; max-height: 30dvh; overflow: auto; }
+
+/* Parties des grilles */
+.part-edit { margin: 10px 0; padding: 10px; border: 1px solid var(--line); border-left: 4px solid var(--primary-2); border-radius: 10px; background: var(--surface); }
+.part-edit .part-head .input { font-weight: 700; }
+.part-edit > .crit-edit:not(.part-head) { margin-left: 14px; }
+.nowrap { white-space: nowrap; }
+.grid-part { margin: 8px 0; border-left: 3px solid var(--primary-2); padding-left: 8px; }
+.grid-part-head { display: flex; justify-content: space-between; gap: 8px; padding: 4px 0; }
+.part-sub { font-weight: 700; color: var(--primary); white-space: nowrap; }
+
+/* Roue du hasard */
+.wheel-wrap { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+.wheel-box { position: relative; flex: 1 1 300px; max-width: 420px; margin: 0 auto; }
+.wheel-box canvas { width: 100%; height: auto; display: block; }
+.wheel-pin { position: absolute; top: -6px; left: 50%; transform: translateX(-50%); width: 0; height: 0; border-left: 16px solid transparent; border-right: 16px solid transparent; border-top: 30px solid var(--danger); filter: drop-shadow(0 2px 2px rgba(0,0,0,.3)); }
+.wheel-side { flex: 1 1 240px; min-width: 0; }
+.wheel-result { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin-bottom: 10px; border-radius: 12px; background: var(--primary-soft); min-height: 60px; justify-content: center; }
+.wheel-result b { font-size: 1.5rem; color: var(--primary); }
+.wheel-result.muted { background: var(--surface-2); }
+.chip.off { opacity: 0.45; text-decoration: line-through; }
+.wheel-order { margin: 4px 0 6px; padding-left: 22px; }
+.wheel-order li { padding: 2px 0; }
+.pass-order { margin: 4px 0 8px; }
+.wheel-side .btn { max-width: 100%; white-space: normal; text-align: left; }

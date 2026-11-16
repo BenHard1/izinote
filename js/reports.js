@@ -206,7 +206,9 @@ export async function studentRecapPdf(student, semesterId, semesterName) {
     text('Compétences', { f: bold, size: 13 });
     for (const { a, r } of comps) {
       text(a.title, { f: bold, size: 10.5, color: grey });
-      for (const l of r.lines) text(`• ${l.label} : ${l.value}`, { size: 10, x: M + 10, maxW: W - 2 * M - 10 });
+      for (const l of r.lines)
+        if (l.part) text(l.label, { f: bold, size: 10, x: M + 10, maxW: W - 2 * M - 10 });
+        else text(`• ${l.label} : ${l.value}`, { size: 10, x: M + (l.sub ? 20 : 10), maxW: W - 2 * M - (l.sub ? 20 : 10) });
       y -= 4;
     }
   }

@@ -1,5 +1,5 @@
 // Écran de correction : affichage du PDF, annotation au stylet, grille, commentaire (écrit ou dicté).
-import { esc, $, $$, modal, toast, attachDictation, speechSupported, computeResult, fmtNum, parseNum, studentName, download, pickFiles, imageToDataUrl } from './util.js';
+import { esc, $, $$, modal, toast, attachDictation, speechSupported, computeResult, fmtNum, parseNum, studentName, download, pickFiles, imageToDataUrl, gridSections, hasParts } from './util.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
 import { BUILTIN_STAMPS, STAMP_SIZES, IMAGE_SCALE, drawStampCanvas, stampBoxCss, preloadImage } from './stamps.js';
 
@@ -970,6 +970,19 @@ export async function mountEditor(root, ctx) {
   }
 
   // ---------- Panneau d'évaluation ----------
+  // Critères rangés par partie (titre de la partie et sous-total), ou à plat si la grille n'a pas de parties
+  function critList(grid, item) {
+    if (!hasParts(grid)) return grid.criteria.map(item).join('');
+    return gridSections(grid)
+      .map(sec => {
+        if (!sec.part) return sec.criteria.map(item).join('');
+        const pm = sec.criteria.reduce((t, c) => t + (+c.max || 0), 0);
+        const filled = sec.criteria.filter(c => copy.evaluation[c.id] != null);
+        const sub = grid.mode === 'note' ? `<span class="part-sub">${filled.length ? fmtNum(filled.reduce((t, c) => t + copy.evaluation[c.id], 0)) : '–'} / ${fmtNum(pm)}</span>` : '';
+        return `<div class="grid-part"><div class="grid-part-head"><b>${esc(sec.part.label)}</b>${sub}</div>${sec.criteria.map(item).join('')}</div>`;
+      })
+      .join('');
+  }
   function renderPanel() {
     const grid = assignment.grid;
     const res = computeResult(grid, copy.evaluation);
@@ -977,9 +990,9 @@ export async function mountEditor(root, ctx) {
     if (!grid || !grid.criteria || !grid.criteria.length) {
       gridHtml = `<p class="muted">Pas encore de grille pour ce devoir.</p><button class="btn small" data-p="grid">Créer la grille</button>`;
     } else if (grid.mode === 'note') {
-      gridHtml = grid.criteria
-        .map(
-          c => `<div class="crit">
+      gridHtml = critList(
+        grid,
+        c => `<div class="crit">
           <div class="crit-label">${esc(c.label)}</div>
           <div class="stepper">
             <button class="icon-btn" data-p="minus" data-c="${c.id}">−</button>
@@ -988,19 +1001,17 @@ export async function mountEditor(root, ctx) {
             <button class="icon-btn" data-p="plus" data-c="${c.id}">+</button>
             <button class="icon-btn" data-p="full" data-c="${c.id}" title="Tous les points">✓</button>
           </div></div>`
-        )
-        .join('');
+      );
     } else {
       const levels = grid.levels;
-      gridHtml = grid.criteria
-        .map(
-          c => `<div class="crit">
+      gridHtml = critList(
+        grid,
+        c => `<div class="crit">
           <div class="crit-label">${esc(c.label)}</div>
           <div class="levels">${levels
             .map((l, i) => `<button class="lvl lvl-${Math.round((i / Math.max(1, levels.length - 1)) * 2)} ${copy.evaluation[c.id] === i ? 'on' : ''}" data-p="lvl" data-c="${c.id}" data-l="${i}">${esc(l)}</button>`)
             .join('')}</div></div>`
-        )
-        .join('');
+      );
     }
     // malus à cocher (grilles en points)
     if (grid && grid.mode === 'note' && (grid.maluses || []).length) {

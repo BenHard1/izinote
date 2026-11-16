@@ -406,6 +406,21 @@ export function newGrid(mode = 'note') {
   };
 }
 
+// Parties d'une grille (ex. « Partie 1 : Présentation de l'entreprise ») : grid.parts = [{ id, label }],
+// chaque critère porte l'id de sa partie dans c.part (sans partie : critère « libre », placé avant les parties).
+// Renvoie les blocs dans l'ordre d'affichage : [{ part: null | { id, label }, criteria: [...] }].
+export function gridSections(grid) {
+  const parts = (grid && grid.parts) || [];
+  const crits = (grid && grid.criteria) || [];
+  const known = c => c.part && parts.some(p => p.id === c.part);
+  const out = [];
+  const free = crits.filter(c => !known(c));
+  if (free.length || !parts.length) out.push({ part: null, criteria: free });
+  for (const p of parts) out.push({ part: p, criteria: crits.filter(c => c.part === p.id) });
+  return out;
+}
+export const hasParts = grid => !!(grid && grid.parts && grid.parts.length && grid.criteria && grid.criteria.some(c => c.part && grid.parts.some(p => p.id === c.part)));
+
 // Bonus cochés pour une copie (evaluation._bonus = liste d'identifiants).
 export function appliedBonus(grid, evaluation = {}) {
   const ids = (evaluation && evaluation._bonus) || [];
@@ -442,12 +457,22 @@ export function computeResult(grid, evaluation = {}) {
     let total = 0,
       max = 0,
       complete = true;
-    for (const c of grid.criteria) {
-      const v = evaluation[c.id];
-      max += +c.max || 0;
-      if (v == null) complete = false;
-      else total += v;
-      lines.push({ label: c.label, value: v == null ? '–' : `${fmtNum(v)} / ${fmtNum(c.max)}` });
+    const sub = hasParts(grid);
+    for (const sec of gridSections(grid)) {
+      // ligne de la partie avec son sous-total (« Partie 1 : 5 / 7 »)
+      if (sub && sec.part) {
+        const pm = sec.criteria.reduce((t, c) => t + (+c.max || 0), 0);
+        const filled = sec.criteria.filter(c => evaluation[c.id] != null);
+        const pt = filled.reduce((t, c) => t + evaluation[c.id], 0);
+        lines.push({ label: sec.part.label, value: filled.length ? `${fmtNum(pt)} / ${fmtNum(pm)}` : `– / ${fmtNum(pm)}`, part: true });
+      }
+      for (const c of sec.criteria) {
+        const v = evaluation[c.id];
+        max += +c.max || 0;
+        if (v == null) complete = false;
+        else total += v;
+        lines.push({ label: c.label, value: v == null ? '–' : `${fmtNum(v)} / ${fmtNum(c.max)}`, sub: !!(sub && sec.part) });
+      }
     }
     let scaled = grid.scaleTo && max ? (total / max) * grid.scaleTo : null;
     // Malus (ex. « Excès d'IA : −1 ») : retirés de la note finale (sur 20 si la note est ramenée sur 20).
@@ -480,11 +505,15 @@ export function computeResult(grid, evaluation = {}) {
     const levels = grid.levels && grid.levels.length ? grid.levels : DEFAULT_LEVELS;
     let complete = true,
       acquired = 0;
-    for (const c of grid.criteria) {
-      const v = evaluation[c.id];
-      if (v == null) complete = false;
-      else if (v === levels.length - 1) acquired++;
-      lines.push({ label: c.label, value: v == null ? '–' : levels[v] });
+    const sub = hasParts(grid);
+    for (const sec of gridSections(grid)) {
+      if (sub && sec.part) lines.push({ label: sec.part.label, value: '', part: true });
+      for (const c of sec.criteria) {
+        const v = evaluation[c.id];
+        if (v == null) complete = false;
+        else if (v === levels.length - 1) acquired++;
+        lines.push({ label: c.label, value: v == null ? '–' : levels[v], sub: !!(sub && sec.part) });
+      }
     }
     const short = `${acquired}/${grid.criteria.length} acquis`;
     return { complete, short, lines, totalLine: `Compétences acquises : ${acquired} / ${grid.criteria.length}` };
@@ -495,7 +524,7 @@ export function resultText(grid, evaluation) {
   const r = computeResult(grid, evaluation);
   if (r.mark) return r.totalLine;
   if (!r.lines.length) return '';
-  return ['Évaluation :', ...r.lines.map(l => `- ${l.label} : ${l.value}`), r.totalLine].join('\n');
+  return ['Évaluation :', ...r.lines.map(l => (l.part ? `\n${l.label}${l.value ? ' : ' + l.value : ''}` : `${l.sub ? '   ' : ''}- ${l.label} : ${l.value}`)), r.totalLine].join('\n');
 }
 
 // Note ramenée sur 20 (grilles en points seulement), ou null.

@@ -3,7 +3,7 @@ import {
   esc, $, $$, modal, form, toast, progressPill, confirmBox, confirmTyped, pickFiles, download, normalize, studentName,
   computeResult, resultText, newGrid, fmtNum, parseNum, fmtDate, DEFAULT_LEVELS,
   KINDS, kindLabel, noCopyKind, noteGrid, imageToDataUrl, dateOf, shortDate,
-  busy,
+  busy, gridSections,
 } from './util.js';
 import { mountEditor } from './editor.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
@@ -12,6 +12,7 @@ import * as sched from './schedule.js';
 import { distributeDialog, mailingsSection } from './distribute.js';
 import * as hw from './homework.js';
 import { canListGrades, openGradeList } from './gradelist.js';
+import { wheelDialog } from './wheel.js';
 import { relayScript } from './relayscript.js';
 import { classData, average, semesterOf, exportClassXlsx, studentRecapPdf } from './reports.js';
 import { readGridFile } from './gridimport.js';
@@ -681,6 +682,7 @@ async function assignmentView(id) {
 
     <div class="row wrap actions-bar">
       ${canListGrades(a) ? `<button class="btn ${isExam ? 'primary' : ''}" id="gradeList">📝 Saisir les notes en liste</button>` : ''}
+      ${isOral || isGroup ? `<button class="btn" id="wheel">🎡 Roue du hasard (ordre de passage)</button>` : ''}
       ${isOral || isGroup ? '' : `<button class="btn" id="import">📄 Importer des copies (PDF${isExam ? ', facultatif' : ''})</button>`}
       <button class="btn ${isExam ? '' : 'primary'}" id="send" ${done ? '' : 'disabled'}>✉ Envoyer ${isExam ? 'les notes (facultatif)' : isOral || isGroup ? 'les résultats' : 'les corrections'}</button>
       <button class="btn ghost" id="dlAll" ${done ? '' : 'disabled'}>⬇ Télécharger les fiches</button>
@@ -689,6 +691,15 @@ async function assignmentView(id) {
     ${
       isGroup
         ? `<section><div class="sec-head"><h2>Groupes <small>(${groups.length})</small></h2><button class="btn primary" id="addG">+ Groupe</button></div>
+          ${
+            (a.passOrder || []).length
+              ? `<p class="small pass-order">🎡 Ordre de passage : ${a.passOrder
+                  .map(gid => groups.find(g => g.id === gid))
+                  .filter(Boolean)
+                  .map((g, i) => `<b>${i + 1}.</b> ${esc(g.name)}`)
+                  .join(' · ')}</p>`
+              : ''
+          }
           <p class="muted small">Évaluez le groupe une fois : la note, la grille et le commentaire sont reportés automatiquement sur la fiche de chaque membre. Pour individualiser la note d'un élève, ouvrez sa ligne plus bas.</p>
           ${
             groups.length
@@ -711,6 +722,7 @@ async function assignmentView(id) {
 
   hw.bindHomework(a, students, () => router());
   if ($('#import')) $('#import').onclick = () => bulkImport(a, students, copies);
+  if ($('#wheel')) $('#wheel').onclick = () => wheelDialog(a, students, () => router());
   if ($('#gradeList')) $('#gradeList').onclick = () => openGradeList(a, students, copies, () => router());
   $$('[data-up]').forEach(b => (b.onclick = () => uploadFor(a, students.find(s => s.id === b.dataset.up), copyOf(b.dataset.up))));
   $('#send').onclick = () => sendDialog(a, cls, students, copies);
@@ -1252,6 +1264,29 @@ async function gridView(kind, id) {
     crumbsHtml = crumbs([...(await chain({ cls })), { label: owner.title, href: back }, { label: 'Grille' }]);
   } else crumbsHtml = crumbs([{ label: 'Mes grilles', href: '#/grilles' }, { label: owner.name || 'Nouvelle' }]);
 
+  grid.parts = grid.parts || [];
+  // une ligne de critère (i : sa place dans grid.criteria)
+  const critRow = (c, i, first) => `<div class="crit-edit">
+          <input class="input" data-label="${i}" value="${esc(c.label)}" placeholder="${grid.mode === 'note' ? 'Ex. Qualité de la rédaction' : 'Ex. Savoir argumenter'}">
+          ${grid.mode === 'note' ? `<input class="input num" data-max="${i}" inputmode="decimal" value="${fmtNum(c.max)}" title="Points"> <span class="muted">pts</span>` : ''}
+          <button class="icon-btn" data-up="${i}" ${first ? 'disabled' : ''} title="Monter">↑</button>
+          <button class="icon-btn" data-del="${i}" title="Supprimer">✕</button></div>`;
+  const critsEditor = () =>
+    gridSections(grid)
+      .map(sec => {
+        const rows = sec.criteria.map((c, k) => critRow(c, grid.criteria.indexOf(c), !k)).join('');
+        if (!sec.part) return rows;
+        const pi = grid.parts.indexOf(sec.part);
+        const pts = sec.criteria.reduce((t, c) => t + (+c.max || 0), 0);
+        return `<div class="part-edit">
+          <div class="crit-edit part-head"><input class="input" data-plabel="${pi}" value="${esc(sec.part.label)}" placeholder="Ex. Partie 1 : Présentation de l’entreprise">
+            ${grid.mode === 'note' ? `<span class="muted small nowrap">${fmtNum(pts)} pts</span>` : ''}
+            <button class="icon-btn" data-pup="${pi}" ${pi ? '' : 'disabled'} title="Monter la partie">↑</button>
+            <button class="icon-btn" data-pdel="${pi}" title="Supprimer la partie (ses critères sont gardés)">✕</button></div>
+          ${rows || '<p class="muted small">Aucun critère dans cette partie.</p>'}
+          <button class="btn small" data-addin="${sec.part.id}">+ ${grid.mode === 'note' ? 'Critère' : 'Compétence'} dans cette partie</button></div>`;
+      })
+      .join('');
   const render = () => {
     view.innerHTML = `<div class="page-wrap narrow">
       ${crumbsHtml}
@@ -1272,16 +1307,9 @@ async function gridView(kind, id) {
               .join('')}</div><button class="btn small" id="addLvl">+ Niveau</button></div>`
       }
       <h2>${grid.mode === 'note' ? 'Critères' : 'Compétences évaluées'}</h2>
-      <div id="crits">${grid.criteria
-        .map(
-          (c, i) => `<div class="crit-edit">
-          <input class="input" data-label="${i}" value="${esc(c.label)}" placeholder="${grid.mode === 'note' ? 'Ex. Qualité de la rédaction' : 'Ex. Savoir argumenter'}">
-          ${grid.mode === 'note' ? `<input class="input num" data-max="${i}" inputmode="decimal" value="${fmtNum(c.max)}" title="Points"> <span class="muted">pts</span>` : ''}
-          <button class="icon-btn" data-up="${i}" ${i ? '' : 'disabled'} title="Monter">↑</button>
-          <button class="icon-btn" data-del="${i}" title="Supprimer">✕</button></div>`
-        )
-        .join('')}</div>
-      <button class="btn" id="addC">+ ${grid.mode === 'note' ? 'Critère' : 'Compétence'}</button>
+      <p class="muted small">Pour une grille en plusieurs parties (ex. « Partie 1 : Présentation de l’entreprise »), ajoutez une partie puis ses critères${grid.mode === 'note' ? ' : le sous-total de chaque partie est calculé' : ''}.</p>
+      <div id="crits">${critsEditor()}</div>
+      <div class="row wrap"><button class="btn" id="addC">+ ${grid.mode === 'note' ? 'Critère' : 'Compétence'}${(grid.parts || []).length ? ' sans partie' : ''}</button><button class="btn" id="addP">+ Partie</button></div>
       ${grid.mode === 'note' && grid.criteria.length ? `<p class="muted">Total : ${fmtNum(grid.criteria.reduce((t, c) => t + (+c.max || 0), 0))} points</p>` : ''}
       ${
         grid.mode === 'note'
@@ -1318,6 +1346,7 @@ async function gridView(kind, id) {
   };
   const read = () => {
     $$('[data-label]').forEach(i => (grid.criteria[+i.dataset.label].label = i.value));
+    $$('[data-plabel]').forEach(i => (grid.parts[+i.dataset.plabel].label = i.value));
     $$('[data-max]').forEach(i => (grid.criteria[+i.dataset.max].max = parseNum(i.value) ?? 0));
     $$('[data-lvl]').forEach(i => (grid.levels[+i.dataset.lvl] = i.value));
     $$('[data-mlabel]').forEach(i => (grid.maluses[+i.dataset.mlabel].label = i.value));
@@ -1358,9 +1387,13 @@ async function gridView(kind, id) {
       const ok = await modal({
         title: 'Vérifiez la grille lue',
         wide: true,
-        body: `<p class="muted small">Une ligne par critère. Pour les points, terminez la ligne par « | nombre ». Corrigez ce qui a été mal lu et supprimez les lignes inutiles.</p>
+        body: `<p class="muted small">Une ligne par critère. Pour les points, terminez la ligne par « | nombre ». Une ligne qui commence par « ## » est le titre d’une partie (ex. « ## Partie 1 : Présentation »). Corrigez ce qui a été mal lu et supprimez les lignes inutiles.</p>
           <div class="seg"><button data-m="note" class="${mode === 'note' ? 'on' : ''}">Notation (points)</button><button data-m="acquis" class="${mode === 'acquis' ? 'on' : ''}">Acquis / non acquis</button></div>
-          <textarea class="input" id="glines" rows="12">${esc(res.criteria.map(c => c.label + (c.max != null ? ' | ' + fmtNum(c.max) : '')).join('\n'))}</textarea>
+          <textarea class="input" id="glines" rows="12">${esc(
+            res.criteria
+              .map((c, i) => (c.part && c.part !== (res.criteria[i - 1] || {}).part ? `## ${c.part}\n` : '') + c.label + (c.max != null ? ' | ' + fmtNum(c.max) : ''))
+              .join('\n')
+          )}</textarea>
           <label class="check"><input type="checkbox" id="greplace" ${grid.criteria.length ? '' : 'checked'}> Remplacer les critères actuels (sinon ils sont ajoutés à la suite)</label>`,
         actions: [{ label: 'Annuler', value: false }, { label: 'Utiliser cette grille', value: true, cls: 'primary' }],
         onOpen: w =>
@@ -1377,29 +1410,70 @@ async function gridView(kind, id) {
         },
       });
       if (!ok) return;
-      const crits = lines.text
-        .split('\n')
-        .map(l => l.trim())
-        .filter(Boolean)
-        .map(l => {
-          const [label, pts] = l.split('|').map(x => x.trim());
-          return { id: db.uid(), label, max: parseNum(pts) ?? 2 };
-        });
+      const crits = [];
+      const parts = [];
+      let cur = null;
+      for (const l of lines.text.split('\n').map(x => x.trim()).filter(Boolean)) {
+        if (l.startsWith('#')) {
+          const label = l.replace(/^#+\s*/, '').trim();
+          if (label) parts.push((cur = { id: db.uid(), label }));
+          continue;
+        }
+        const [label, pts] = l.split('|').map(x => x.trim());
+        crits.push({ id: db.uid(), label, max: parseNum(pts) ?? 2, ...(cur ? { part: cur.id } : {}) });
+      }
       grid.mode = mode;
       if (mode === 'note' && grid.scaleTo == null) grid.scaleTo = 20;
       grid.criteria = lines.replace ? crits : [...grid.criteria, ...crits];
+      grid.parts = [...(lines.replace ? [] : grid.parts || []), ...parts];
       render();
       toast(`${crits.length} critère${crits.length > 1 ? 's' : ''} importé${crits.length > 1 ? 's' : ''} : vérifiez puis enregistrez.`, 'success');
     };
     $('#impGrid').onclick = () => importGrid(false);
     $('#camGrid').onclick = () => importGrid(true);
-    $('#addC').onclick = () => {
+    // ajoute un critère (dans une partie ou sans partie) et met le curseur dessus
+    const addCrit = part => {
       read();
-      grid.criteria.push({ id: db.uid(), label: '', max: 4 });
+      const c = { id: db.uid(), label: '', max: 4 };
+      if (part) c.part = part;
+      grid.criteria.push(c);
       render();
-      const inputs = $$('[data-label]');
-      inputs[inputs.length - 1].focus();
+      const inp = $(`[data-label="${grid.criteria.indexOf(c)}"]`);
+      if (inp) inp.focus();
     };
+    $('#addC').onclick = () => addCrit(null);
+    $$('[data-addin]').forEach(b => (b.onclick = () => addCrit(b.dataset.addin)));
+    $('#addP').onclick = () => {
+      read();
+      const p = { id: db.uid(), label: `Partie ${grid.parts.length + 1} : ` };
+      grid.parts.push(p);
+      grid.criteria.push({ id: db.uid(), label: '', max: 2, part: p.id });
+      render();
+      const inp = $(`[data-plabel="${grid.parts.length - 1}"]`);
+      inp.focus();
+      inp.setSelectionRange(inp.value.length, inp.value.length);
+    };
+    $$('[data-pup]').forEach(
+      b =>
+        (b.onclick = () => {
+          read();
+          const i = +b.dataset.pup;
+          [grid.parts[i - 1], grid.parts[i]] = [grid.parts[i], grid.parts[i - 1]];
+          render();
+        })
+    );
+    $$('[data-pdel]').forEach(
+      b =>
+        (b.onclick = () => {
+          read();
+          const [p] = grid.parts.splice(+b.dataset.pdel, 1);
+          const kept = grid.criteria.filter(c => c.part === p.id && c.label.trim());
+          grid.criteria = grid.criteria.filter(c => c.part !== p.id || c.label.trim());
+          kept.forEach(c => delete c.part);
+          render();
+          if (kept.length) toast(`Partie supprimée : ses ${kept.length} critère${kept.length > 1 ? 's sont gardés' : ' est gardé'}, sans partie.`);
+        })
+    );
     $$('[data-del]').forEach(b => (b.onclick = () => (read(), grid.criteria.splice(+b.dataset.del, 1), render())));
     if ($('#addM'))
       $('#addM').onclick = () => {
@@ -1423,8 +1497,13 @@ async function gridView(kind, id) {
       b =>
         (b.onclick = () => {
           read();
+          // échange avec le critère précédent de la même partie
           const i = +b.dataset.up;
-          [grid.criteria[i - 1], grid.criteria[i]] = [grid.criteria[i], grid.criteria[i - 1]];
+          const sec = gridSections(grid).find(x => x.criteria.includes(grid.criteria[i]));
+          const k = sec.criteria.indexOf(grid.criteria[i]);
+          if (k < 1) return;
+          const j = grid.criteria.indexOf(sec.criteria[k - 1]);
+          [grid.criteria[j], grid.criteria[i]] = [grid.criteria[i], grid.criteria[j]];
           render();
         })
     );
@@ -1433,6 +1512,11 @@ async function gridView(kind, id) {
     $('#save').onclick = async () => {
       read();
       grid.criteria = grid.criteria.filter(c => c.label.trim());
+      // parties : sans critère, elles disparaissent ; les critères sont rangés dans l'ordre des parties
+      grid.parts = grid.parts.filter(p => grid.criteria.some(c => c.part === p.id));
+      grid.parts.forEach((p, i) => (p.label = p.label.trim().replace(/[:\s]+$/, '') || `Partie ${i + 1}`));
+      grid.criteria = gridSections(grid).flatMap(x => x.criteria);
+      if (!grid.parts.length) delete grid.parts;
       grid.maluses = (grid.maluses || []).filter(m => m.label.trim() && +m.pts);
       grid.bonuses = (grid.bonuses || []).filter(m => m.label.trim() && +m.pts);
       grid.levels = grid.levels.map(l => l.trim()).filter(Boolean);
@@ -1471,6 +1555,7 @@ async function gridView(kind, id) {
         if (ok && chosen) {
           grid = JSON.parse(JSON.stringify(chosen.grid));
           grid.criteria.forEach(c => (c.id = db.uid()));
+          grid.parts = grid.parts || [];
           grid.levels = grid.levels && grid.levels.length ? grid.levels : [...DEFAULT_LEVELS];
           render();
           toast('Grille chargée : pensez à enregistrer.');

@@ -87,6 +87,12 @@ export function parseGrid(lines) {
       .trim();
     if (l.length < 3 || skip.test(l) || /^grille\s+d/i.test(l) || /^(crit[eè]res?|comp[ée]tences?|items?)(\s+(points?|bar[eè]me|niveaux?|notes?|acquis|en cours|non acquis))*\s*$/i.test(l)) continue;
     if (/^total\b/i.test(l)) continue;
+    // titre de partie : « Partie 1 : Présentation de l'entreprise », « II - Animation »… (sans points)
+    const pm = l.match(/^(partie|section)\s*([0-9]{1,2}|[IVX]{1,4}|[A-H])\b\s*[:.\-–]?\s*(.*)$/i);
+    if (pm && !/(\d+(?:[.,]\d+)?)\s*(pts?|points?)\s*\)?\s*$/i.test(pm[3] || '')) {
+      crits.push({ partTitle: l.replace(/[\s:]+$/, '') });
+      continue;
+    }
     let max = null;
     const m =
       l.match(/[/]\s*(\d+(?:[.,]\d+)?)\s*(?:pts?|points?)?\s*\)?\s*$/i) ||
@@ -105,7 +111,14 @@ export function parseGrid(lines) {
     if (l.length < 3) continue;
     crits.push({ label: l.charAt(0).toUpperCase() + l.slice(1), max: max != null && max > 0 && max <= 100 ? max : null });
   }
-  const withPts = crits.filter(c => c.max != null).length;
-  const mode = crits.length && withPts >= crits.length / 2 ? 'note' : 'acquis';
-  return { mode, criteria: crits };
+  // les titres de partie sont rangés à part : chaque critère porte le titre de sa partie
+  const out = [];
+  let part = null;
+  for (const c of crits) {
+    if (c.partTitle) part = c.partTitle;
+    else out.push(part ? { ...c, part } : c);
+  }
+  const withPts = out.filter(c => c.max != null).length;
+  const mode = out.length && withPts >= out.length / 2 ? 'note' : 'acquis';
+  return { mode, criteria: out };
 }

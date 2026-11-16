@@ -196,11 +196,15 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
     page.drawText(grid.mode === 'note' ? 'Points' : 'Niveau', { x: M + colW - valW + 8, y: y - 15, size: 10, font: bold, color: ink });
     y -= 22;
     for (const l of r.lines) {
-      const lab = wrapText(safe(l.label), font, 10.5, colW - valW - 16);
+      // partie (titre en gras sur fond, avec son sous-total) et ses critères en retrait
+      const ind = l.sub ? 18 : 0;
+      const lf = l.part ? bold : font;
+      const lab = wrapText(safe(l.label), lf, 10.5, colW - valW - 16 - ind);
       const val = wrapText(safe(l.value), font, 10.5, valW - 16);
       const h = Math.max(lab.length, val.length) * 14 + 10;
       ensure(h);
-      lab.forEach((t, k) => page.drawText(t, { x: M + 8, y: y - 16 - k * 14, size: 10.5, font, color: ink }));
+      if (l.part) page.drawRectangle({ x: M, y: y - h, width: colW, height: h, color: rgb(0.98, 0.95, 0.91) });
+      lab.forEach((t, k) => page.drawText(t, { x: M + 8 + ind, y: y - 16 - k * 14, size: 10.5, font: lf, color: ink }));
       val.forEach((t, k) => page.drawText(t, { x: M + colW - valW + 8, y: y - 16 - k * 14, size: 10.5, font: bold, color: ink }));
       y -= h;
       page.drawLine({ start: { x: M, y }, end: { x: M + colW, y }, thickness: 0.5, color: rgb(0.89, 0.84, 0.76) });
