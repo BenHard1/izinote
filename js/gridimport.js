@@ -46,7 +46,8 @@ async function ocr(canvasOrFile, onProgress) {
   }
 }
 
-export async function readGridFile(file, onProgress = () => {}) {
+// Lignes de texte d'un PDF ou d'une photo (reconnaissance de texte si besoin).
+export async function readLines(file, onProgress = () => {}) {
   let lines;
   if (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name)) {
     onProgress('Lecture du PDF…');
@@ -66,7 +67,11 @@ export async function readGridFile(file, onProgress = () => {}) {
     onProgress('Reconnaissance du texte de la photo…');
     lines = await ocr(file, p => onProgress(`Reconnaissance du texte… ${p} %`));
   }
-  return parseGrid(lines);
+  return lines;
+}
+
+export async function readGridFile(file, onProgress = () => {}) {
+  return parseGrid(await readLines(file, onProgress));
 }
 
 // Transforme des lignes de texte en critères. Repère les points : « /4 », « 4 pts », « (2 points) », « 3 » en fin de ligne.

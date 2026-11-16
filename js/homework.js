@@ -5,9 +5,13 @@
 //  - a.dueDate : date de rendu (AAAA-MM-JJ, la même que la « Date » de l'évaluation) ;
 //  - a.brief   : { text, remind: ['j7', 'j0'], remindHour: '08:00', docsInReminders } ;
 //  - a.docs    : documents de travail [{ id, name, type, size, blob }] (synchronisés à part, voir sync.js) ;
-//  - a.handout : envoi aux élèves { recipients: [id élève], subject, body, sentAt, count } ;
-//  - a.mails   : envois programmés [{ id, kind: 'send' | 'j7' | 'j0', sendAt, via: 'relay' | 'local', sentAt, error, skipped }].
-// Un seul mail par envoi, élèves en copie cachée (comme « Envoyer un document »).
+//  - a.handout : envoi aux élèves { recipients: [id élève], subject, body, sentAt, count, mode } ;
+//    mode 'individual' : un mail par élève (« Bonjour {prenom} », son groupe et les consignes de son groupe),
+//    sinon un seul mail avec les élèves en copie cachée ;
+//  - a.brief.groupText : consignes propres à chaque groupe { [id du groupe]: texte } (travail de groupe) ;
+//  - a.mails   : envois programmés [{ id, kind: 'send' | 'j7' | 'j0', sendAt, via: 'relay' | 'local', sentAt, error, skipped, parts, done }].
+//    parts : envoi individuel confié au relais (un identifiant par élève) ; done : élèves déjà servis (envoi local).
+// Les rappels partent en un seul mail, élèves en copie cachée (comme « Envoyer un document »).
 import * as db from './db.js';
 import * as gmail from './gmail.js';
 import * as sched from './schedule.js';
@@ -64,7 +68,8 @@ function whenText(a, at) {
 
 export function defaultSubject(a) {
   if (isExam(a)) return `Contrôle : ${a.title} – le ${longDate(a.dueDate)}`;
-  return `${a.kind === 'projet' ? 'Projet' : 'Devoir'} : ${a.title} – à rendre le ${longDate(a.dueDate)}`;
+  if (a.kind === 'oral') return `Oral : ${a.title} – le ${longDate(a.dueDate)}`;
+  return `${a.kind === 'projet' ? 'Projet' : a.kind === 'groupe' ? 'Travail de groupe' : 'Devoir'} : ${a.title} – à rendre le ${longDate(a.dueDate)}`;
 }
 export function defaultBody(a, settings) {
   const b = briefOf(a);
@@ -82,7 +87,7 @@ export function defaultBody(a, settings) {
       .join('\n\n');
   return [
     'Bonjour à tous,',
-    `Voici « ${a.title} », à rendre pour le ${longDate(a.dueDate)}.`,
+    `Voici ${a.kind === 'oral' ? 'les consignes de l’oral ' : ''}« ${a.title} », ${dueWhat(a)}.`,
     b.text ? `Consignes :\n${b.text}` : '',
     n ? `Vous trouverez ${n > 1 ? 'les documents de travail' : 'le document de travail'} en pièce jointe.` : '',
     'Vous recevrez un rappel par mail avant la date de rendu.',
@@ -91,6 +96,50 @@ export function defaultBody(a, settings) {
     .filter(Boolean)
     .join('\n\n');
 }
+// ---------- Envoi individuel ----------
+export const isIndividual = a => a.handout?.mode === 'individual';
+const joinNames = l => (l.length <= 1 ? l.join('') : l.slice(0, -1).join(', ') + ' et ' + l[l.length - 1]);
+// Champs remplacés dans le mail de chaque élève
+export function studentVars(a, s, students) {
+  const g = a.kind === 'groupe' ? (a.groups || []).find(x => x.studentIds.includes(s.id)) : null;
+  const others = g ? g.studentIds.filter(id => id !== s.id).map(id => students.find(x => x.id === id)).filter(Boolean).map(studentName) : [];
+  const gt = g && ((a.brief && a.brief.groupText) || {})[g.id];
+  return {
+    prenom: s.firstName || studentName(s),
+    nom: s.lastName || '',
+    groupe: g ? g.name : '',
+    membres: joinNames(others),
+    groupe_info: g ? `Vous faites partie du groupe « ${g.name} »${others.length ? ` avec ${joinNames(others)}` : ''}.` : '',
+    consignes_groupe: gt ? `Consignes de votre groupe :\n${gt}` : '',
+  };
+}
+export const fillStudent = (tpl, vars) =>
+  gmail
+    .fillTemplate(tpl, vars)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+function dueWhat(a) {
+  return a.kind === 'oral' ? `prévu le ${longDate(a.dueDate)}` : `à rendre pour le ${longDate(a.dueDate)}`;
+}
+export function defaultIndividualBody(a, settings) {
+  const b = briefOf(a);
+  const n = (a.docs || []).length;
+  const grp = a.kind === 'groupe';
+  return [
+    'Bonjour {prenom},',
+    `Voici ${a.kind === 'oral' ? 'les consignes de l’oral ' : ''}« ${a.title} », ${dueWhat(a)}.`,
+    grp ? '{groupe_info}' : '',
+    b.text ? `Consignes :\n${b.text}` : '',
+    grp ? '{consignes_groupe}' : '',
+    n ? `Vous trouverez ${n > 1 ? 'les documents de travail' : 'le document de travail'} en pièce jointe.` : '',
+    b.remind.length ? `Vous recevrez un rappel par mail avant ${a.kind === 'oral' ? 'l’oral' : 'la date de rendu'}.` : '',
+    settings.teacherName ? `Bon travail,\n${settings.teacherName}` : 'Bon travail !',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
 function reminderMail(a, kind, at, settings) {
   const b = briefOf(a);
   const docs = b.docsInReminders ? a.docs || [] : [];
@@ -143,6 +192,41 @@ async function docsAttachments(docs) {
   }
   return out;
 }
+// Mails de l'envoi individuel : un par élève coché ayant une adresse [{ sid, who, to, subject, body, attachments }]
+async function individualMails(a) {
+  const ids = a.handout?.recipients || [];
+  const students = await db.by('students', 'classId', a.classId);
+  const list = students.filter(s => ids.includes(s.id) && s.email);
+  if (!list.length) throw Object.assign(new Error('aucun destinataire avec une adresse e-mail'), { final: true });
+  const attachments = await docsAttachments(a.docs || []);
+  return list.map(s => {
+    const v = studentVars(a, s, students);
+    return { sid: s.id, who: studentName(s), to: s.email.trim(), subject: fillStudent(a.handout.subject, v), body: fillStudent(a.handout.body, v), attachments };
+  });
+}
+// Tous les mails d'un envoi : plusieurs pour l'envoi individuel du devoir, sinon un seul
+async function buildMails(a, kind, at, settings) {
+  if (kind === 'send' && isIndividual(a)) return individualMails(a);
+  return [await buildMail(a, kind, at, settings)];
+}
+// Envoie les mails un par un ; ceux déjà partis (done) sont sautés. Renvoie les échecs.
+async function sendEach(clientId, mails, done = [], onStep = () => {}) {
+  const failed = [];
+  for (const m of mails) {
+    if (m.sid && done.includes(m.sid)) continue;
+    try {
+      const { sid, who, ...msg } = m;
+      await gmail.sendMail(clientId, msg);
+      if (sid) done.push(sid);
+    } catch (e) {
+      if (mails.length === 1) throw e;
+      failed.push({ who: m.who, msg: e.message });
+    }
+    onStep();
+  }
+  return failed;
+}
+
 // Mail complet d'un envoi (devoir ou rappel), prêt pour Gmail ou le relais
 async function buildMail(a, kind, at, settings) {
   const bcc = await recipientsBcc(a);
@@ -170,7 +254,7 @@ const pendingMails = a => (a.mails || []).filter(m => !m.sentAt && !m.skipped);
 // Annule les envois pas encore partis (y compris chez le relais).
 export async function cancelPending(a, { keepSend = false } = {}) {
   const list = pendingMails(a).filter(m => !(keepSend && m.kind === 'send'));
-  const viaRelay = list.filter(m => m.via === 'relay').map(m => m.id);
+  const viaRelay = list.filter(m => m.via === 'relay').flatMap(m => m.parts || [m.id]);
   if (viaRelay.length) await sched.relayCancel(await db.getSettings(), viaRelay);
   a.mails = (a.mails || []).filter(m => !list.includes(m));
 }
@@ -201,12 +285,22 @@ export async function planMails(a, settings, { sendAt = null } = {}) {
   for (const p of plan) {
     const m = { id: `hw_${a.id}_${p.kind}_${db.uid()}`, kind: p.kind, sendAt: p.sendAt, via: 'local' };
     if (relay) {
+      const parts = [];
       try {
-        await sched.relayScheduleMail(settings, { id: m.id, sendAt: m.sendAt, ...(await buildMail(a, p.kind, p.sendAt, settings)) });
+        const mails = await buildMails(a, p.kind, p.sendAt, settings);
+        if (mails.length === 1 && !mails[0].sid) await sched.relayScheduleMail(settings, { id: m.id, sendAt: m.sendAt, ...mails[0] });
+        else
+          for (const [i, { sid, who, ...mail }] of mails.entries()) {
+            const id = `${m.id}_${i}`;
+            await sched.relayScheduleMail(settings, { id, sendAt: m.sendAt, ...mail });
+            parts.push(id);
+          }
+        if (parts.length) m.parts = parts;
         m.via = 'relay';
       } catch (e) {
         console.warn(e);
-        toast('Relais injoignable : ce rappel partira depuis IziNote. ' + e.message, 'error');
+        if (parts.length) await sched.relayCancel(settings, parts).catch(() => {});
+        toast('Relais injoignable : cet envoi partira depuis IziNote. ' + e.message, 'error');
       }
     }
     a.mails.push(m);
@@ -214,14 +308,19 @@ export async function planMails(a, settings, { sendAt = null } = {}) {
   return plan;
 }
 
-// Envoi du devoir tout de suite (le clic a déjà autorisé Gmail)
-export async function sendNow(a, settings) {
+// Envoi du devoir tout de suite (le clic a déjà autorisé Gmail). onStep(n, total) : progression de l'envoi individuel.
+export async function sendNow(a, settings, onStep = () => {}) {
   const at = Date.now();
-  await gmail.sendMail(settings.googleClientId, await buildMail(a, 'send', at, settings));
+  const mails = await buildMails(a, 'send', at, settings);
+  let n = 0;
+  const failed = await sendEach(settings.googleClientId, mails, [], () => onStep(++n, mails.length));
+  if (failed.length === mails.length) throw new Error(failed[0].msg);
+  a.handout.count = mails.length - failed.length;
   a.handout.sentAt = at;
   a.mails = (a.mails || []).filter(m => m.kind !== 'send' || m.sentAt);
   a.mails.push({ id: `hw_${a.id}_send_${db.uid()}`, kind: 'send', sendAt: at, via: 'now', sentAt: at });
   await logMailing(a, at);
+  return failed;
 }
 
 // ---------- Branché sur le planificateur (schedule.js) ----------
@@ -230,21 +329,25 @@ async function withMails() {
 }
 
 sched.registerSource({
-  relayIds: async () => (await withMails()).flatMap(a => pendingMails(a).filter(m => m.via === 'relay').map(m => m.id)),
+  relayIds: async () => (await withMails()).flatMap(a => pendingMails(a).filter(m => m.via === 'relay').flatMap(m => m.parts || [m.id])),
   applyRelay: async data => {
     let n = 0;
     const ack = [];
     for (const a of await withMails()) {
       let changed = false;
       for (const m of pendingMails(a).filter(m => m.via === 'relay')) {
-        if (data.sent && data.sent[m.id]) {
-          markSent(a, m, data.sent[m.id]);
+        const ids = m.parts || [m.id];
+        const err = ids.map(id => data.errors && data.errors[id]).find(Boolean);
+        if (ids.every(id => (data.sent && data.sent[id]) || (data.errors && data.errors[id])) && ids.some(id => data.sent && data.sent[id])) {
+          // envoi individuel : il est fait quand chaque élève est servi (ou en échec définitif)
+          markSent(a, m, Math.max(...ids.map(id => (data.sent && data.sent[id]) || 0)));
+          if (err) m.error = err;
           if (m.kind === 'send') await logMailing(a, m.sentAt);
-          ack.push(m.id);
+          ack.push(...ids);
           changed = true;
           n++;
-        } else if (data.errors && data.errors[m.id] && m.error !== data.errors[m.id]) {
-          m.error = data.errors[m.id];
+        } else if (err && m.error !== err) {
+          m.error = err;
           changed = true;
         }
       }
@@ -275,7 +378,14 @@ sched.registerSource({
             const fm = fresh && (fresh.mails || []).find(x => x.id === m.id);
             if (!fm || fm.sentAt || fm.skipped) return;
             const at = Date.now();
-            await gmail.sendMail(st.googleClientId, await buildMail(fresh, fm.kind, at, st));
+            const mails = await buildMails(fresh, fm.kind, at, st);
+            fm.done = fm.done || [];
+            const failed = await sendEach(st.googleClientId, mails, fm.done);
+            if (failed.length) {
+              await db.put('assignments', fresh); // les élèves déjà servis ne recevront pas le mail deux fois
+              throw new Error(failed.map(f => `${f.who} : ${f.msg}`).join(' ; '));
+            }
+            delete fm.done;
             markSent(fresh, fm, at);
             if (fm.kind === 'send') await logMailing(fresh, at);
             await db.put('assignments', fresh);
@@ -307,8 +417,10 @@ function mailTag(m) {
 }
 
 export function homeworkSection(a) {
-  if (a.kind === 'oral' && !hasBrief(a)) return '';
   const exam = isExam(a);
+  if (!hasBrief(a) && (a.kind === 'oral' || a.kind === 'groupe'))
+    return `<div class="hw-box hw-empty"><div><b>📌 Consignes ${a.kind === 'oral' ? 'de l’oral' : 'du travail de groupe'}</b><p class="muted small">Ajoutez la date, les consignes${a.kind === 'groupe' ? ' (communes et propres à chaque groupe)' : ''} et les documents, puis envoyez-les à toute la classe ou à chaque élève individuellement, avec des rappels automatiques.</p></div>
+      <button class="btn" id="hwEdit">Préparer les consignes</button></div>`;
   if (!hasBrief(a) && exam)
     return `<div class="hw-box hw-empty"><div><b>📝 Contrôle à préparer</b><p class="muted small">Indiquez la date du contrôle, le cours à réviser et joignez le cours et les exercices à refaire : les élèves recevront un rappel une semaine avant et la veille.</p></div>
       <button class="btn" id="hwEdit">Préparer les rappels</button></div>`;
@@ -330,7 +442,7 @@ export function homeworkSection(a) {
     ${b.text ? `<p class="hw-text">${esc(b.text)}</p>` : ''}
     ${(a.docs || []).length ? `<div class="file-chips">${a.docs.map(d => `<button type="button" class="chip file-chip" data-doc="${d.id}" title="Ouvrir">📄 ${esc(d.name)} <small>${sizeLabel(d.size || 0)}</small></button>`).join('')}</div>` : ''}
     <ul class="hw-status">
-      ${exam ? (h && h.sentAt ? `<li><b>Annonce envoyée</b> <span class="tag sent">✓ ${esc(fmtDate(h.sentAt))} · ${h.count} élève${h.count > 1 ? 's' : ''}</span></li>` : !h ? '<li class="muted">Rappels pas encore programmés.</li>' : '') : h && h.sentAt ? `<li><b>Devoir envoyé</b> <span class="tag sent">✓ ${esc(fmtDate(h.sentAt))} · ${h.count} élève${h.count > 1 ? 's' : ''}</span></li>` : !planned.some(m => m.kind === 'send') ? '<li class="muted">Pas encore envoyé aux élèves.</li>' : ''}
+      ${exam ? (h && h.sentAt ? `<li><b>Annonce envoyée</b> <span class="tag sent">✓ ${esc(fmtDate(h.sentAt))} · ${h.count} élève${h.count > 1 ? 's' : ''}</span></li>` : !h ? '<li class="muted">Rappels pas encore programmés.</li>' : '') : h && h.sentAt ? `<li><b>${a.kind === 'oral' || a.kind === 'groupe' ? 'Consignes envoyées' : 'Devoir envoyé'}</b> <span class="tag sent">✓ ${esc(fmtDate(h.sentAt))} · ${h.count} élève${h.count > 1 ? 's' : ''}${h.mode === 'individual' ? ' · un mail chacun' : ''}</span></li>` : !planned.some(m => m.kind === 'send') ? '<li class="muted">Pas encore envoyé aux élèves.</li>' : ''}
       ${mails.map(mailLine(a)).join('')}
     </ul>
     ${planned.length ? '<button type="button" class="linkbtn" id="hwCancel">Annuler les envois programmés</button>' : ''}
@@ -369,12 +481,26 @@ export async function editBrief(a, students, refresh) {
   const b = briefOf(a);
   const docs = [...(a.docs || [])];
   const ok = await modal({
-    title: `${isExam(a) ? 'Contrôle' : 'Devoir à rendre'} – ${a.title}`,
+    title: `${isExam(a) ? 'Contrôle' : a.kind === 'oral' || a.kind === 'groupe' ? 'Consignes' : 'Devoir à rendre'} – ${a.title}`,
     wide: true,
     body: `
-      <label class="field"><span>${isExam(a) ? 'Date du contrôle' : 'Date de rendu'}</span><input class="input" type="date" id="hwDue" value="${esc(a.dueDate || '')}" style="max-width:220px"></label>
+      <label class="field"><span>${isExam(a) ? 'Date du contrôle' : a.kind === 'oral' ? 'Date de l’oral' : 'Date de rendu'}</span><input class="input" type="date" id="hwDue" value="${esc(a.dueDate || '')}" style="max-width:220px"></label>
       <label class="field"><span>${isExam(a) ? 'À réviser' : 'Consignes'} <small class="muted">(repris dans les mails aux élèves)</small></span><textarea class="input" id="hwText" rows="5" placeholder="${isExam(a) ? 'Ex. Chapitre 3 (les fonctions affines), refaire les exercices 2, 5 et 8 page 64.' : 'Ex. Faire les exercices 1 à 4 page 52. Rendre un PDF ou une photo lisible.'}">${esc(b.text)}</textarea></label>
       <div class="row wrap"><button type="button" class="btn small" id="hwMic">🎙 Dicter</button></div>
+      ${
+        a.kind === 'groupe' && (a.groups || []).length
+          ? `<div class="field"><span>Consignes propres à chaque groupe <small class="muted">(facultatif, ex. le sujet de l’exposé ; envoyées avec l’envoi individuel)</small></span>
+        ${a.groups
+          .map(
+            g => `<div class="hw-group"><span>👥 <b>${esc(g.name)}</b> <small class="muted">${g.studentIds.map(id => students.find(s => s.id === id)).filter(Boolean).map(studentName).map(esc).join(', ')}</small></span>
+          <textarea class="input" rows="2" data-gtext="${g.id}" placeholder="Ex. Sujet : la révolution industrielle">${esc((b.groupText || {})[g.id] || '')}</textarea>
+          <button type="button" class="btn small" data-gmic="${g.id}">🎙 Dicter</button></div>`
+          )
+          .join('')}</div>`
+          : a.kind === 'groupe'
+          ? '<p class="muted small">Créez les groupes pour pouvoir ajouter des consignes propres à chacun.</p>'
+          : ''
+      }
       <div class="field"><span>${isExam(a) ? 'Cours et exercices à refaire' : 'Documents de travail'}</span>
         <div id="hwFiles" class="file-chips"></div>
         <div class="row wrap"><button type="button" class="btn" id="hwAdd">📎 Ajouter des fichiers</button><span class="muted small" id="hwSize"></span></div>
@@ -387,6 +513,7 @@ export async function editBrief(a, students, refresh) {
     actions: [{ label: 'Annuler', value: null }, { label: 'Enregistrer', value: 'save', cls: 'primary' }],
     onOpen: w => {
       attachDictation($('#hwMic', w), $('#hwText', w));
+      $$('[data-gmic]', w).forEach(btn => attachDictation(btn, $(`[data-gtext="${btn.dataset.gmic}"]`, w)));
       const render = () => {
         $('#hwFiles', w).innerHTML = docs
           .map((d, i) => `<span class="chip file-chip">📄 ${esc(d.name)} <small>${sizeLabel(d.size)}</small><button type="button" class="linkbtn" data-rm="${i}" title="Retirer">✕</button></span>`)
@@ -414,6 +541,9 @@ export async function editBrief(a, students, refresh) {
         remindHour: $('#hwHour', w).value || '08:00',
         docsInReminders: $('#hwDocsRem', w).checked,
       };
+      const gt = {};
+      $$('[data-gtext]', w).forEach(t => t.value.trim() && (gt[t.dataset.gtext] = t.value.trim()));
+      if (Object.keys(gt).length) a.brief.groupText = gt;
       return true;
     },
   });
@@ -431,7 +561,7 @@ export async function editBrief(a, students, refresh) {
     }
   }
   await db.put('assignments', a);
-  toast(isExam(a) ? 'Contrôle enregistré ✓' : 'Devoir enregistré ✓', 'success');
+  toast(isExam(a) ? 'Contrôle enregistré ✓' : a.kind === 'oral' || a.kind === 'groupe' ? 'Consignes enregistrées ✓' : 'Devoir enregistré ✓', 'success');
   refresh();
 }
 
@@ -459,16 +589,33 @@ export async function sendDialog(a, students, refresh) {
     : '<li class="muted">Aucun rappel (modifiable avec « ✎ Modifier »).</li>';
 
   const exam = isExam(a);
+  // envoi individuel : un mail par élève ; proposé d'office pour les oraux et travaux de groupe
+  const indivFirst = a.handout ? a.handout.mode === 'individual' : a.kind === 'oral' || a.kind === 'groupe';
+  const drafts = {
+    group: defaultBody(a, settings),
+    individual: defaultIndividualBody(a, settings),
+  };
   await modal({
-    title: `${exam ? 'Rappels du contrôle' : 'Envoyer le devoir'} – ${a.title}`,
+    title: `${exam ? 'Rappels du contrôle' : a.kind === 'oral' || a.kind === 'groupe' ? 'Envoyer les consignes' : 'Envoyer le devoir'} – ${a.title}`,
     wide: true,
     body: `
-      <p class="muted">${exam ? 'Les rappels partent aux élèves cochés, en <b>copie cachée</b>, avec ce qu’il faut réviser et les documents.' : 'Un seul mail, avec les élèves en <b>copie cachée</b>. Les rappels partent aux mêmes élèves.'}</p>
+      ${
+        exam
+          ? '<p class="muted">Les rappels partent aux élèves cochés, en <b>copie cachée</b>, avec ce qu’il faut réviser et les documents.</p>'
+          : `<div class="field"><span>Mode d’envoi</span>
+        <label class="check"><input type="radio" name="hsMode" value="group" ${indivFirst ? '' : 'checked'}> Un seul mail à tous, élèves en copie cachée</label>
+        <label class="check"><input type="radio" name="hsMode" value="individual" ${indivFirst ? 'checked' : ''}> Un mail individuel à chaque élève${a.kind === 'groupe' ? ', avec son groupe et les consignes de son groupe' : ' (« Bonjour Léa, »)'}</label>
+        <small class="muted">Les rappels partent ensuite aux mêmes élèves, en un seul mail en copie cachée.</small></div>`
+      }
       ${exam ? `<label class="check"><input type="checkbox" id="hsNow"> ✉ Envoyer aussi une annonce maintenant</label>` : ''}
       <div id="hsAnn" ${exam ? 'hidden' : ''}>
       <label class="field"><span>Objet</span><input class="input" id="hsSubject" value="${esc(a.handout?.subject || defaultSubject(a))}"></label>
-      <label class="field"><span>Message</span><textarea class="input" id="hsBody" rows="9">${esc(defaultBody(a, settings))}</textarea></label>
+      <label class="field"><span>Message</span><textarea class="input" id="hsBody" rows="9">${esc(exam ? defaultBody(a, settings) : drafts[indivFirst ? 'individual' : 'group'])}</textarea></label>
       <div class="row wrap"><button type="button" class="btn small" id="hsMic">🎙 Dicter</button></div>
+      <div id="hsIndiv" hidden>
+        <p class="muted small">Remplacés pour chaque élève : {prenom} {nom}${a.kind === 'groupe' ? ' {groupe} {membres} {groupe_info} {consignes_groupe}' : ''}</p>
+        <div class="hs-prev"><small class="muted" id="hsPrevWho"></small><pre id="hsPrev"></pre></div>
+      </div>
       </div>
       <div class="field"><span>Pièces jointes</span>${
         docs.length
@@ -495,6 +642,34 @@ export async function sendDialog(a, students, refresh) {
     actions: [{ label: 'Annuler', value: null }, { label: exam ? 'Programmer les rappels' : 'Envoyer', value: 'send', cls: 'primary' }],
     onOpen: (w, close) => {
       attachDictation($('#hsMic', w), $('#hsBody', w));
+      const modeOf = () => ($('input[name=hsMode]:checked', w) || {}).value || 'group';
+      let mode = modeOf();
+      // aperçu du mail du premier élève coché
+      const preview = () => {
+        $('#hsIndiv', w).hidden = mode !== 'individual';
+        if (mode !== 'individual') return;
+        const sid = ($('input[data-s]:checked', w) || {}).dataset?.s;
+        const s = students.find(x => x.id === sid);
+        if (!s) {
+          $('#hsPrevWho', w).textContent = 'Cochez un élève pour voir l’aperçu.';
+          $('#hsPrev', w).textContent = '';
+          return;
+        }
+        const v = studentVars(a, s, students);
+        $('#hsPrevWho', w).textContent = `Aperçu pour ${studentName(s)} :`;
+        $('#hsPrev', w).textContent = `Objet : ${fillStudent($('#hsSubject', w).value, v)}\n\n${fillStudent($('#hsBody', w).value, v)}`;
+      };
+      $$('input[name=hsMode]', w).forEach(r =>
+        r.addEventListener('change', () => {
+          drafts[mode] = $('#hsBody', w).value;
+          mode = modeOf();
+          $('#hsBody', w).value = drafts[mode];
+          preview();
+        })
+      );
+      w.addEventListener('input', e => e.target.matches('#hsBody, #hsSubject') && preview());
+      w.addEventListener('change', e => e.target.matches('input[data-s]') && preview());
+      preview();
       const nowBox = $('#hsNow', w);
       if (nowBox)
         nowBox.onchange = () => {
@@ -543,13 +718,15 @@ export async function sendDialog(a, students, refresh) {
         try {
           const prevSent = a.handout?.sentAt || null;
           a.handout = { recipients: ids, subject, body, sentAt: null, count: ids.length };
+          if (!exam && modeOf() === 'individual') a.handout.mode = 'individual';
+          let failed = [];
           if (later) {
             await planMails(a, settings, { sendAt: when });
           } else if (!announce) {
             if (a.handout && prevSent) a.handout.sentAt = prevSent;
             await planMails(a, settings);
           } else {
-            await sendNow(a, settings);
+            failed = await sendNow(a, settings, (n, t) => t > 1 && (sendBtn.textContent = `Envoi ${n}/${t}…`));
             await db.put('assignments', a); // le mail est parti : on l'enregistre avant de programmer les rappels
             try {
               await planMails(a, settings);
@@ -562,9 +739,10 @@ export async function sendDialog(a, students, refresh) {
           toast(
             !announce
               ? `${n} rappel${n > 1 ? 's' : ''} programmé${n > 1 ? 's' : ''} pour ${ids.length} élève${ids.length > 1 ? 's' : ''} ✓`
-              : `${later ? `Devoir programmé pour ${sched.fmtDateTime(when)}` : `Devoir envoyé à ${ids.length} élève${ids.length > 1 ? 's' : ''}`}${n ? ` · ${n} rappel${n > 1 ? 's' : ''} programmé${n > 1 ? 's' : ''}` : ''} ✓`,
+              : `${later ? `Envoi programmé pour ${sched.fmtDateTime(when)}` : `Envoyé à ${a.handout.count} élève${a.handout.count > 1 ? 's' : ''}${a.handout.mode === 'individual' ? ' (un mail chacun)' : ''}`}${n ? ` · ${n} rappel${n > 1 ? 's' : ''} programmé${n > 1 ? 's' : ''}` : ''} ✓`,
             'success'
           );
+          if (failed.length) toast(`Non envoyé à : ${failed.map(f => `${f.who} (${f.msg})`).join(', ')}`, 'error');
           close(true);
         } catch (e) {
           console.error(e);

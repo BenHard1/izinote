@@ -11,6 +11,7 @@ import * as gmail from './gmail.js';
 import * as sched from './schedule.js';
 import { distributeDialog, mailingsSection } from './distribute.js';
 import * as hw from './homework.js';
+import { canListGrades, openGradeList } from './gradelist.js';
 import { relayScript } from './relayscript.js';
 import { classData, average, semesterOf, exportClassXlsx, studentRecapPdf } from './reports.js';
 import { readGridFile } from './gridimport.js';
@@ -679,6 +680,7 @@ async function assignmentView(id) {
     ${allDone && sent < students.length ? `<div class="banner success">✓ Toute la classe est évaluée.${isExam ? ' Les notes sont enregistrées (l’envoi par mail est facultatif).' : ' Vous pouvez envoyer les résultats.'}</div>` : ''}
 
     <div class="row wrap actions-bar">
+      ${canListGrades(a) ? `<button class="btn ${isExam ? 'primary' : ''}" id="gradeList">📝 Saisir les notes en liste</button>` : ''}
       ${isOral || isGroup ? '' : `<button class="btn" id="import">📄 Importer des copies (PDF${isExam ? ', facultatif' : ''})</button>`}
       <button class="btn ${isExam ? '' : 'primary'}" id="send" ${done ? '' : 'disabled'}>✉ Envoyer ${isExam ? 'les notes (facultatif)' : isOral || isGroup ? 'les résultats' : 'les corrections'}</button>
       <button class="btn ghost" id="dlAll" ${done ? '' : 'disabled'}>⬇ Télécharger les fiches</button>
@@ -709,6 +711,7 @@ async function assignmentView(id) {
 
   hw.bindHomework(a, students, () => router());
   if ($('#import')) $('#import').onclick = () => bulkImport(a, students, copies);
+  if ($('#gradeList')) $('#gradeList').onclick = () => openGradeList(a, students, copies, () => router());
   $$('[data-up]').forEach(b => (b.onclick = () => uploadFor(a, students.find(s => s.id === b.dataset.up), copyOf(b.dataset.up))));
   $('#send').onclick = () => sendDialog(a, cls, students, copies);
   $('#dlAll').onclick = () => downloadAll(a, cls, students, copies);
