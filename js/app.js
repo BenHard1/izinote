@@ -685,7 +685,7 @@ async function assignmentView(id) {
 
     <div class="row wrap actions-bar">
       ${canListGrades(a) ? `<button class="btn ${isExam ? 'primary' : ''}" id="gradeList">📝 Saisir les notes en liste</button>` : ''}
-      ${isOral || isGroup ? `<button class="btn" id="wheel">🎡 Roue du hasard (ordre de passage)</button><button class="btn" id="timer">⏱ Minuteur</button>` : ''}
+      ${isOral || isGroup ? `<button class="btn" id="wheel">🎡 Roue du hasard (ordre de passage)</button><button class="btn" id="timer">⏱ Chronomètre</button>` : ''}
       ${isOral || isGroup ? '' : `<button class="btn" id="import">📄 Importer des copies (PDF${isExam ? ', facultatif' : ''})</button>`}
       <button class="btn ${isExam ? '' : 'primary'}" id="send" ${done ? '' : 'disabled'}>✉ Envoyer ${isExam ? 'les notes (facultatif)' : isOral || isGroup ? 'les résultats' : 'les corrections'}</button>
       <button class="btn ghost" id="dlAll" ${done ? '' : 'disabled'}>⬇ Télécharger les fiches</button>

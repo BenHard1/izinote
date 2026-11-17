@@ -68,7 +68,7 @@ export async function mountEditor(root, ctx) {
       <div class="ed-title"><b>${esc(studentName(student))}</b><small>${esc(assignment.title)} · ${idx + 1}/${ctx.order.length}</small></div>
       <button class="icon-btn" data-act="prev" ${prevId ? '' : 'disabled'} title="Étudiant précédent">‹</button>
       <button class="icon-btn" data-act="next" ${nextId ? '' : 'disabled'} title="Étudiant suivant">›</button>
-      ${(ctx.kind === 'oral' || ctx.kind === 'groupe') ? '<button class="icon-btn" data-act="timer" title="Minuteur">⏱</button>' : ''}
+      ${(ctx.kind === 'oral' || ctx.kind === 'groupe') ? '<button class="icon-btn" data-act="timer" title="Chronomètre">⏱</button>' : ''}
       <button class="btn small" data-act="panel">📝 Évaluation</button>
     </div>
     <div class="ed-tools">
