@@ -1,5 +1,5 @@
 // Écran de correction : affichage du PDF, annotation au stylet, grille, commentaire (écrit ou dicté).
-import { esc, $, $$, modal, toast, attachDictation, speechSupported, computeResult, fmtNum, parseNum, studentName, download, pickFiles, imageToDataUrl, gridSections, hasParts } from './util.js';
+import { esc, $, $$, modal, toast, attachDictation, speechSupported, computeResult, fmtNum, parseNum, studentName, download, pickFiles, imageToDataUrl, gridSections, hasParts, LEVEL_SCALE } from './util.js';
 import { attachTextTools } from './richtext.js';
 import { openTimer } from './timer.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
@@ -983,8 +983,24 @@ export async function mountEditor(root, ctx) {
     if (!v && !ccOpen.has(c.id)) return `<button type="button" class="linkbtn small cc-add" data-p="cc" data-c="${c.id}">💬 Ajouter un commentaire</button>`;
     return `<textarea class="input cc-text" data-cc="${c.id}" rows="2" placeholder="Commentaire sur « ${esc(c.label)} » (facultatif)">${esc(v)}</textarea>`;
   };
-  function critList(grid, item0) {
-    const item = c => item0(c).replace(/<\/div>\s*$/, ccHtml(c) + '</div>');
+  function critList(grid, item0, { rows = false } = {}) {
+    const item = rows ? item0 : c => item0(c).replace(/<\/div>\s*$/, ccHtml(c) + '</div>');
+    if (rows) {
+      // présentation en lignes : titre de partie souligné d'un trait, puis une ligne par critère
+      const head = `<div class="crow-cols"><span></span><span>Note</span><span>Commentaire</span></div>`;
+      return (
+        head +
+        gridSections(grid)
+          .map(sec => {
+            const body = sec.criteria.map(item).join('');
+            if (!sec.part || !hasParts(grid)) return body;
+            const pm = sec.criteria.reduce((t, c) => t + (+c.max || 0), 0);
+            const filled = sec.criteria.filter(c => copy.evaluation[c.id] != null);
+            return `<div class="grid-part rows"><div class="gp-title"><h4>${esc(sec.part.label)}</h4><span class="gp-line"></span><span class="part-sub">${filled.length ? fmtNum(filled.reduce((t, c) => t + copy.evaluation[c.id], 0)) : '–'} / ${fmtNum(pm)}</span></div>${body}</div>`;
+          })
+          .join('')
+      );
+    }
     if (!hasParts(grid)) return grid.criteria.map(item).join('');
     return gridSections(grid)
       .map(sec => {
@@ -1002,6 +1018,26 @@ export async function mountEditor(root, ctx) {
     let gridHtml = '';
     if (!grid || !grid.criteria || !grid.criteria.length) {
       gridHtml = `<p class="muted">Pas encore de grille pour ce devoir.</p><button class="btn small" data-p="grid">Créer la grille</button>`;
+    } else if (grid.mode === 'note' && (grid.levelScale || ctx.kind === 'oral' || ctx.kind === 'groupe')) {
+      // oraux, travaux de groupe et grilles avec échelle de niveaux : une ligne par critère
+      // (nom et niveaux | note | commentaire)
+      const cc = copy.evaluation._cc || {};
+      const lv = copy.evaluation._lv || {};
+      gridHtml = critList(
+        grid,
+        c => `<div class="crow">
+          <div class="crow-name"><div class="crit-label">${esc(c.label)}</div>${
+            grid.levelScale
+              ? `<div class="scale">${LEVEL_SCALE.map(
+                  l => `<button type="button" class="scale-btn ${lv[c.id] === l.k ? 'on' : ''} sc-${l.k}" data-p="slv" data-c="${c.id}" data-l="${l.k}" title="${esc(l.title)}"><span class="box"></span><small>${l.label}</small></button>`
+                ).join('')}</div>`
+              : ''
+          }</div>
+          <div class="crow-note"><input class="input num" inputmode="decimal" data-c="${c.id}" value="${copy.evaluation[c.id] == null ? '' : fmtNum(copy.evaluation[c.id])}" placeholder="–" aria-label="Note ${esc(c.label)}"><span class="max">/ ${fmtNum(c.max)}</span></div>
+          <div class="crow-ccw"><textarea class="input cc-text crow-cc" data-cc="${c.id}" rows="2" placeholder="Commentaire" aria-label="Commentaire ${esc(c.label)}">${esc(cc[c.id] || '')}</textarea></div>
+        </div>`,
+        { rows: true }
+      );
     } else if (grid.mode === 'note') {
       gridHtml = critList(
         grid,
@@ -1285,6 +1321,24 @@ export async function mountEditor(root, ctx) {
         const step = +c.max <= 2 ? 0.25 : 0.5;
         const base = cur == null ? (b.dataset.p === 'plus' ? 0 : +c.max) : cur + (b.dataset.p === 'plus' ? step : -step);
         return setScore(cid, base);
+      }
+      case 'slv': {
+        // niveau de l'échelle : remplit la note (un nouveau clic sur le même niveau l'enlève)
+        const c = assignment.grid.criteria.find(x => x.id === cid);
+        const l = LEVEL_SCALE.find(x => x.k === b.dataset.l);
+        const lv = { ...(copy.evaluation._lv || {}) };
+        if (lv[cid] === l.k) {
+          delete lv[cid];
+          delete copy.evaluation[cid];
+        } else {
+          lv[cid] = l.k;
+          const step = +c.max <= 2 ? 0.25 : 0.5;
+          copy.evaluation[cid] = Math.round((+c.max * l.pct) / step) * step;
+        }
+        if (Object.keys(lv).length) copy.evaluation._lv = lv;
+        else delete copy.evaluation._lv;
+        renderPanel();
+        return changed();
       }
       case 'cc': {
         ccOpen.add(cid);

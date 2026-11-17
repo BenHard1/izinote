@@ -1377,7 +1377,9 @@ async function gridView(kind, id) {
       </div>
       ${
         grid.mode === 'note'
-          ? `<label class="field inline"><span>Ramener la note sur</span><input class="input num" id="scale" inputmode="numeric" value="${grid.scaleTo ?? ''}" placeholder="(non)"><small class="muted">Laissez vide pour garder le total des points.</small></label>`
+          ? `<label class="field inline"><span>Ramener la note sur</span><input class="input num" id="scale" inputmode="numeric" value="${grid.scaleTo ?? ''}" placeholder="(non)"><small class="muted">Laissez vide pour garder le total des points.</small></label>
+      <label class="check"><input type="checkbox" id="lvlScale" ${grid.levelScale ? 'checked' : ''}> Échelle de niveaux pour chaque critère : <b>Abs · Ins · AB · B · TB</b></label>
+      <p class="muted small" style="margin-top:-4px">En évaluant, touchez un niveau : la note du critère se remplit (Abs 0, Ins ¼, AB ½, B ¾, TB tous les points), vous pouvez l’ajuster. Le niveau est repris sur la fiche et dans le mail.</p>`
           : `<div class="field"><span>Niveaux (du plus faible au plus fort)</span><div id="levels">${grid.levels
               .map((l, i) => `<div class="crit-edit"><input class="input" data-lvl="${i}" value="${esc(l)}"><button class="icon-btn" data-dellvl="${i}" ${grid.levels.length <= 2 ? 'disabled' : ''}>✕</button></div>`)
               .join('')}</div><button class="btn small" id="addLvl">+ Niveau</button></div>`
@@ -1430,6 +1432,10 @@ async function gridView(kind, id) {
     $$('[data-blabel]').forEach(i => (grid.bonuses[+i.dataset.blabel].label = i.value));
     $$('[data-bpts]').forEach(i => (grid.bonuses[+i.dataset.bpts].pts = Math.abs(parseNum(i.value) ?? 0)));
     if ($('#scale')) grid.scaleTo = parseNum($('#scale').value);
+    if ($('#lvlScale')) {
+      if ($('#lvlScale').checked) grid.levelScale = true;
+      else delete grid.levelScale;
+    }
     if ($('#gname')) owner.name = $('#gname').value.trim();
     if ($('#gsubject')) owner.subject = $('#gsubject').value.trim();
   };

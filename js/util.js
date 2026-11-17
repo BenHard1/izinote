@@ -440,6 +440,18 @@ export function appliedMalus(grid, evaluation = {}) {
 export const MARKS = { absent: 'Absent', missing: 'Non rendu' };
 export const markOf = evaluation => (evaluation && MARKS[evaluation._mark] ? evaluation._mark : null);
 
+// Échelle de niveaux facultative d'une grille en points (grid.levelScale) : un clic sur un niveau
+// remplit la note du critère (Abs 0, Ins 25 %, AB 50 %, B 75 %, TB 100 % des points), modifiable ensuite.
+// Le niveau choisi est gardé dans evaluation._lv = { [id du critère]: 'b' }.
+export const LEVEL_SCALE = [
+  { k: 'abs', label: 'Abs', title: 'Absent / non traité', pct: 0 },
+  { k: 'ins', label: 'Ins', title: 'Insuffisant', pct: 0.25 },
+  { k: 'ab', label: 'AB', title: 'Assez bien', pct: 0.5 },
+  { k: 'b', label: 'B', title: 'Bien', pct: 0.75 },
+  { k: 'tb', label: 'TB', title: 'Très bien', pct: 1 },
+];
+export const levelOf = (grid, evaluation, id) => (grid && grid.levelScale ? LEVEL_SCALE.find(l => l.k === ((evaluation && evaluation._lv) || {})[id]) : null) || null;
+
 // Commentaire écrit sur un critère (evaluation._cc = { [id du critère]: texte })
 const ccOf = (evaluation, id) => ((evaluation && evaluation._cc && evaluation._cc[id]) || '').trim();
 
@@ -474,7 +486,8 @@ export function computeResult(grid, evaluation = {}) {
         max += +c.max || 0;
         if (v == null) complete = false;
         else total += v;
-        lines.push({ label: c.label, value: v == null ? '–' : `${fmtNum(v)} / ${fmtNum(c.max)}`, sub: !!(sub && sec.part), comment: ccOf(evaluation, c.id) });
+        const lv = levelOf(grid, evaluation, c.id);
+        lines.push({ label: c.label, value: (v == null ? '–' : `${fmtNum(v)} / ${fmtNum(c.max)}`) + (lv ? ` (${lv.title})` : ''), sub: !!(sub && sec.part), comment: ccOf(evaluation, c.id) });
       }
     }
     let scaled = grid.scaleTo && max ? (total / max) * grid.scaleTo : null;
