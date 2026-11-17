@@ -142,14 +142,8 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
   const grey = rgb(0.42, 0.37, 0.32);
   const accent = rgb(0.76, 0.34, 0.06);
   const orange = rgb(1, 0.47, 0.16);
-  // bandeau IziNote : filet orange + logo simplifié en haut à droite
+  // filet orange en haut de la fiche (le logo IziNote n'est pas mis : la fiche part chez les élèves)
   page.drawRectangle({ x: 0, y: H - 8, width: W, height: 8, color: orange });
-  try {
-    const logoBytes = await (await fetch('assets/logo-simplifie.png')).arrayBuffer();
-    const logo = await doc.embedPng(logoBytes);
-    const lw = 110;
-    page.drawImage(logo, { x: W - M - lw, y: H - M - (lw * logo.height) / logo.width + 14, width: lw, height: (lw * logo.height) / logo.width });
-  } catch {}
   // logo de l'école en haut à gauche, s'il a été ajouté
   let indent = 0;
   try {

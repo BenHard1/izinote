@@ -130,11 +130,7 @@ export async function studentRecapPdf(student, semesterId, semesterName) {
     }
   };
   newPage();
-  // logos
-  try {
-    const logo = await doc.embedPng(await (await fetch('assets/logo-simplifie.png')).arrayBuffer());
-    page.drawImage(logo, { x: W - M - 100, y: H - M - 26, width: 100, height: (100 * logo.height) / logo.width });
-  } catch {}
+  // logo de l'école seulement (pas celui d'IziNote)
   let titleX = M;
   if (school && school.logo) {
     try {
