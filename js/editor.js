@@ -1033,7 +1033,7 @@ export async function mountEditor(root, ctx) {
                 ).join('')}</div>`
               : ''
           }</div>
-          <div class="crow-note"><input class="input num" inputmode="decimal" data-c="${c.id}" value="${copy.evaluation[c.id] == null ? '' : fmtNum(copy.evaluation[c.id])}" placeholder="–" aria-label="Note ${esc(c.label)}"><span class="max">/ ${fmtNum(c.max)}</span></div>
+          <div class="crow-note"><div class="crow-adj"><button type="button" class="adj-btn" data-p="minus" data-c="${c.id}" title="Retirer ${+c.max <= 2 ? 'un quart de point' : 'un demi-point'}" aria-label="Moins">−</button><input class="input num" inputmode="decimal" data-c="${c.id}" value="${copy.evaluation[c.id] == null ? '' : fmtNum(copy.evaluation[c.id])}" placeholder="–" aria-label="Note ${esc(c.label)}"><button type="button" class="adj-btn" data-p="plus" data-c="${c.id}" title="Ajouter ${+c.max <= 2 ? 'un quart de point' : 'un demi-point'}" aria-label="Plus">+</button></div><span class="max">/ ${fmtNum(c.max)}</span></div>
           <div class="crow-ccw"><textarea class="input cc-text crow-cc" data-cc="${c.id}" rows="2" placeholder="Commentaire" aria-label="Commentaire ${esc(c.label)}">${esc(cc[c.id] || '')}</textarea></div>
         </div>`,
         { rows: true }
