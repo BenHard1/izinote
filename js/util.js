@@ -440,6 +440,9 @@ export function appliedMalus(grid, evaluation = {}) {
 export const MARKS = { absent: 'Absent', missing: 'Non rendu' };
 export const markOf = evaluation => (evaluation && MARKS[evaluation._mark] ? evaluation._mark : null);
 
+// Commentaire écrit sur un critère (evaluation._cc = { [id du critère]: texte })
+const ccOf = (evaluation, id) => ((evaluation && evaluation._cc && evaluation._cc[id]) || '').trim();
+
 export function computeResult(grid, evaluation = {}) {
   const mark = markOf(evaluation);
   if (mark === 'absent') return { complete: true, short: 'Absent', lines: [], totalLine: 'Absent : pas de note pour cette évaluation.', mark };
@@ -471,7 +474,7 @@ export function computeResult(grid, evaluation = {}) {
         max += +c.max || 0;
         if (v == null) complete = false;
         else total += v;
-        lines.push({ label: c.label, value: v == null ? '–' : `${fmtNum(v)} / ${fmtNum(c.max)}`, sub: !!(sub && sec.part) });
+        lines.push({ label: c.label, value: v == null ? '–' : `${fmtNum(v)} / ${fmtNum(c.max)}`, sub: !!(sub && sec.part), comment: ccOf(evaluation, c.id) });
       }
     }
     let scaled = grid.scaleTo && max ? (total / max) * grid.scaleTo : null;
@@ -512,7 +515,7 @@ export function computeResult(grid, evaluation = {}) {
         const v = evaluation[c.id];
         if (v == null) complete = false;
         else if (v === levels.length - 1) acquired++;
-        lines.push({ label: c.label, value: v == null ? '–' : levels[v], sub: !!(sub && sec.part) });
+        lines.push({ label: c.label, value: v == null ? '–' : levels[v], sub: !!(sub && sec.part), comment: ccOf(evaluation, c.id) });
       }
     }
     const short = `${acquired}/${grid.criteria.length} acquis`;
@@ -524,7 +527,7 @@ export function resultText(grid, evaluation) {
   const r = computeResult(grid, evaluation);
   if (r.mark) return r.totalLine;
   if (!r.lines.length) return '';
-  return ['Évaluation :', ...r.lines.map(l => (l.part ? `\n${l.label}${l.value ? ' : ' + l.value : ''}` : `${l.sub ? '   ' : ''}- ${l.label} : ${l.value}`)), r.totalLine].join('\n');
+  return ['Évaluation :', ...r.lines.map(l => (l.part ? `\n${l.label}${l.value ? ' : ' + l.value : ''}` : `${l.sub ? '   ' : ''}- ${l.label} : ${l.value}${l.comment ? `\n${l.sub ? '   ' : ''}  ${l.comment.replace(/\n/g, ' ')}` : ''}`)), r.totalLine].join('\n');
 }
 
 // Note ramenée sur 20 (grilles en points seulement), ou null.

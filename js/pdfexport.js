@@ -1,7 +1,7 @@
 // Fabrique le PDF corrigé : la copie d'origine + les annotations au stylet + une page « Fiche d'évaluation ».
 import { computeResult, studentName, fmtDate, fullComment } from './util.js';
 import { drawStampPdf } from './stamps.js';
-import { blocks } from './richtext.js';
+import { blocks, toPlain } from './richtext.js';
 
 const { PDFDocument, StandardFonts, rgb, LineCapStyle, PageSizes } = window.PDFLib;
 
@@ -240,8 +240,11 @@ async function addEvaluationPage(doc, { copy, student, assignment, cls, settings
       const lf = l.part ? bold : font;
       const lab = wrapText(safe(l.label), lf, 10.5, colW - valW - 16 - ind);
       const val = wrapText(safe(l.value), font, 10.5, valW - 16);
-      const h = Math.max(lab.length, val.length) * 14 + 10;
+      // commentaire du critère, en italique sous son nom
+      const cm = l.comment ? wrapText(safe(toPlain(l.comment)), italic, 9.5, colW - valW - 16 - ind) : [];
+      const h = Math.max(lab.length, val.length) * 14 + 10 + cm.length * 12.5;
       ensure(h);
+      cm.forEach((t, k) => page.drawText(t, { x: M + 8 + ind, y: y - 16 - lab.length * 14 - k * 12.5 + 2, size: 9.5, font: italic, color: grey }));
       if (l.part) page.drawRectangle({ x: M, y: y - h, width: colW, height: h, color: rgb(0.98, 0.95, 0.91) });
       lab.forEach((t, k) => page.drawText(t, { x: M + 8 + ind, y: y - 16 - k * 14, size: 10.5, font: lf, color: ink }));
       val.forEach((t, k) => page.drawText(t, { x: M + colW - valW + 8, y: y - 16 - k * 14, size: 10.5, font: bold, color: ink }));

@@ -159,14 +159,18 @@ function listSel(ta, numbered) {
 
 // Ajoute la barre (gras, italique, souligné, listes, orthographe) au-dessus d'une zone de texte.
 // Sans effet si elle est déjà là.
-export function attachTextTools(ta, { spell = true } = {}) {
+export function attachTextTools(ta, { spell = true, format = true } = {}) {
   if (!ta || ta.dataset.tools) return;
   ta.dataset.tools = '1';
   const bar = document.createElement('div');
   bar.className = 'fmt-bar';
-  bar.innerHTML = `<button type="button" data-f="b" title="Gras"><b>G</b></button><button type="button" data-f="i" title="Italique"><i>I</i></button><button type="button" data-f="u" title="Souligné"><u>S</u></button>
-    <button type="button" data-f="ul" title="Liste à puces">• Liste</button><button type="button" data-f="ol" title="Liste numérotée">1. Liste</button>
-    ${spell ? `<span class="fmt-sep"></span><button type="button" data-f="spell" title="Vérifier l’orthographe">✓ Orthographe</button><label class="fmt-auto" title="Vérifier pendant que vous écrivez"><input type="checkbox" ${spellOn() ? 'checked' : ''}> auto</label>` : ''}`;
+  bar.innerHTML = `${
+    format
+      ? `<button type="button" data-f="b" title="Gras"><b>G</b></button><button type="button" data-f="i" title="Italique"><i>I</i></button><button type="button" data-f="u" title="Souligné"><u>S</u></button>
+    <button type="button" data-f="ul" title="Liste à puces">• Liste</button><button type="button" data-f="ol" title="Liste numérotée">1. Liste</button><span class="fmt-sep"></span>`
+      : ''
+  }
+    ${spell ? `<button type="button" data-f="spell" title="Vérifier l’orthographe">✓ Orthographe</button><label class="fmt-auto" title="Vérifier pendant que vous écrivez"><input type="checkbox" ${spellOn() ? 'checked' : ''}> auto</label>` : ''}`;
   // la barre se place au-dessus du bloc (zone + micro)
   const host = ta.closest('.dictate-wrap') || ta;
   host.insertAdjacentElement('beforebegin', bar);

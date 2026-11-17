@@ -1,6 +1,7 @@
 // Écran de correction : affichage du PDF, annotation au stylet, grille, commentaire (écrit ou dicté).
 import { esc, $, $$, modal, toast, attachDictation, speechSupported, computeResult, fmtNum, parseNum, studentName, download, pickFiles, imageToDataUrl, gridSections, hasParts } from './util.js';
 import { attachTextTools } from './richtext.js';
+import { openTimer } from './timer.js';
 import { buildCorrectedPdf, correctedFileName } from './pdfexport.js';
 import { BUILTIN_STAMPS, STAMP_SIZES, IMAGE_SCALE, drawStampCanvas, stampBoxCss, preloadImage } from './stamps.js';
 
@@ -67,6 +68,7 @@ export async function mountEditor(root, ctx) {
       <div class="ed-title"><b>${esc(studentName(student))}</b><small>${esc(assignment.title)} · ${idx + 1}/${ctx.order.length}</small></div>
       <button class="icon-btn" data-act="prev" ${prevId ? '' : 'disabled'} title="Étudiant précédent">‹</button>
       <button class="icon-btn" data-act="next" ${nextId ? '' : 'disabled'} title="Étudiant suivant">›</button>
+      ${(ctx.kind === 'oral' || ctx.kind === 'groupe') ? '<button class="icon-btn" data-act="timer" title="Minuteur">⏱</button>' : ''}
       <button class="btn small" data-act="panel">📝 Évaluation</button>
     </div>
     <div class="ed-tools">
@@ -354,6 +356,8 @@ export async function mountEditor(root, ctx) {
             return prevId && ctx.goto(prevId);
           case 'next':
             return nextId && ctx.goto(nextId);
+          case 'timer':
+            return openTimer();
           case 'panel':
             st.panelOpen = prefs.panelOpen = !st.panelOpen;
             ed.classList.toggle('panel-open', st.panelOpen);
@@ -972,7 +976,15 @@ export async function mountEditor(root, ctx) {
 
   // ---------- Panneau d'évaluation ----------
   // Critères rangés par partie (titre de la partie et sous-total), ou à plat si la grille n'a pas de parties
-  function critList(grid, item) {
+  // commentaire propre à un critère (copy.evaluation._cc = { [id du critère]: texte }), repris sur la fiche et dans le mail
+  const ccOpen = new Set();
+  const ccHtml = c => {
+    const v = ((copy.evaluation && copy.evaluation._cc) || {})[c.id] || '';
+    if (!v && !ccOpen.has(c.id)) return `<button type="button" class="linkbtn small cc-add" data-p="cc" data-c="${c.id}">💬 Ajouter un commentaire</button>`;
+    return `<textarea class="input cc-text" data-cc="${c.id}" rows="2" placeholder="Commentaire sur « ${esc(c.label)} » (facultatif)">${esc(v)}</textarea>`;
+  };
+  function critList(grid, item0) {
+    const item = c => item0(c).replace(/<\/div>\s*$/, ccHtml(c) + '</div>');
     if (!hasParts(grid)) return grid.criteria.map(item).join('');
     return gridSections(grid)
       .map(sec => {
@@ -1033,9 +1045,10 @@ export async function mountEditor(root, ctx) {
             .map(bn => `<button class="lvl bonus ${ids.includes(bn.id) ? 'on' : ''}" data-p="bonus" data-k="${key}" data-c="${bn.id}">${esc(bn.label)} + ${fmtNum(bn.pts)}</button>`)
             .join('')}</div>`
         : '';
+    let memberHtml = '';
     if (student.isGroup && (ctx.members || []).length) {
-      // travail de groupe : pour chaque élève, bonus / participation et commentaire individuel
-      gridHtml += `<div class="crit member-sec"><div class="crit-label">Pour chaque élève</div>
+      // travail de groupe : pour chaque élève, bonus / participation et commentaire individuel (en fin de panneau)
+      memberHtml = `<div class="crit member-sec"><div class="crit-label">Pour chaque élève</div>
         <p class="muted small">Facultatif. Le bonus s'ajoute à la note du groupe, et le commentaire s'ajoute à la suite du commentaire du groupe, dans la fiche et le mail de cet élève seulement.</p>
         ${ctx.members
           .map(
@@ -1077,6 +1090,7 @@ export async function mountEditor(root, ctx) {
         </div>
         <div class="fold-body">${gridHtml}</div>
       </div>
+      ${student.isGroup ? '<div class="two-col">' : ''}
       <div class="panel-sec private-sec ${fold.notes ? 'folded' : ''}">
         <div class="panel-head">
           ${foldBtn('notes', '🔒 Questions et notes')}
@@ -1103,6 +1117,8 @@ export async function mountEditor(root, ctx) {
         ${speechSupported ? '<p class="muted small">Dictée : dites « virgule », « point », « à la ligne ».</p>' : '<p class="muted small">Dictée indisponible dans ce navigateur : utilisez Chrome, ou le micro du clavier Samsung.</p>'}
         </div>
       </div>
+      ${student.isGroup ? '</div>' : ''}
+      ${memberHtml && !mark ? `<div class="panel-sec ${fold.members ? 'folded' : ''}"><div class="panel-head">${foldBtn('members', 'Commentaires individuels')}</div><div class="fold-body">${memberHtml}</div></div>` : ''}
       <div class="panel-sec actions">
         <button class="btn ${copy.status === 'done' ? 'success' : 'primary'} block" data-p="done">${ctx.kind === 'controle' ? (copy.status === 'done' ? '✓ Note validée' : 'Valider la note') : copy.status === 'done' ? '✓ Copie corrigée' : 'Marquer comme corrigée'}</button>
         ${nextId ? `<button class="btn block" data-p="next">Étudiant suivant →</button>` : ''}
@@ -1116,6 +1132,18 @@ export async function mountEditor(root, ctx) {
     });
     attachDictation($('#cmic', panel), ta);
     attachTextTools(ta);
+    // commentaires par critère
+    $$('.cc-text', panel).forEach(t => {
+      attachTextTools(t, { format: false });
+      t.addEventListener('input', () => {
+        const cc = { ...(copy.evaluation._cc || {}) };
+        if (t.value.trim()) cc[t.dataset.cc] = t.value;
+        else delete cc[t.dataset.cc];
+        if (Object.keys(cc).length) copy.evaluation._cc = cc;
+        else delete copy.evaluation._cc;
+        changed();
+      });
+    });
     // commentaires individuels (enregistrés un instant après la frappe)
     $$('.member-comment', panel).forEach(t => {
       attachTextTools(t);
@@ -1235,6 +1263,13 @@ export async function mountEditor(root, ctx) {
         const step = +c.max <= 2 ? 0.25 : 0.5;
         const base = cur == null ? (b.dataset.p === 'plus' ? 0 : +c.max) : cur + (b.dataset.p === 'plus' ? step : -step);
         return setScore(cid, base);
+      }
+      case 'cc': {
+        ccOpen.add(cid);
+        renderPanel();
+        const t = $(`[data-cc="${cid}"]`, panel);
+        if (t) t.focus();
+        return;
       }
       case 'full':
         return setScore(cid, +assignment.grid.criteria.find(x => x.id === cid).max);

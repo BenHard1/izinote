@@ -609,3 +609,34 @@ button.file-chip { cursor: pointer; font: inherit; border: none; }
 .fmt-preview { margin-top: 6px; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--surface-2); font-size: 0.92rem; }
 .fmt-preview ul, .fmt-preview ol, .hw-text ul, .hw-text ol, .hs-prev ul, .hs-prev ol { margin: 4px 0; padding-left: 24px; }
 .hs-prev #hsPrev { white-space: normal; }
+
+/* Commentaire par critère */
+.cc-add { display: block; margin-top: 4px; }
+.cc-text { margin-top: 6px; font-size: 0.92rem; }
+/* Travail de groupe : questions et commentaire côte à côte */
+.two-col { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 12px; align-items: start; }
+.two-col > .panel-sec { min-width: 0; }
+.two-col textarea { min-height: 220px; }
+
+/* Minuteur */
+.timer-box { position: fixed; left: 12px; bottom: 12px; z-index: 900; width: 290px; max-width: calc(100vw - 24px); padding: 10px 12px; border-radius: 14px; background: var(--surface); border: 2px solid var(--primary-2); box-shadow: var(--shadow); }
+.timer-box.small { width: auto; }
+.timer-box.pulse { animation: tmpulse 0.6s; }
+@keyframes tmpulse { 50% { transform: scale(1.06); } }
+.tm-head { display: flex; align-items: center; gap: 6px; }
+.tm-time { flex: 1; font-size: 2rem; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text); min-width: 4ch; }
+.timer-box.small .tm-time { font-size: 1.4rem; }
+.tm-btn { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: inherit; font-size: 1rem; cursor: pointer; }
+.tm-btn.primary { background: var(--primary-2); color: #141414; border-color: var(--primary-2); }
+.tm-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin: 8px 0 4px; }
+.tm-bar span { display: block; height: 100%; background: var(--primary-2); transition: width 0.25s linear; }
+.tm-presets, .tm-quick { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; align-items: center; }
+.tm-presets button, .tm-quick button { border: 1px solid var(--line); background: var(--surface); color: var(--text); border-radius: 99px; padding: 4px 10px; font: inherit; font-size: 0.85rem; cursor: pointer; }
+.tm-presets button.on { background: var(--primary-soft); color: var(--primary); border-color: var(--primary-2); font-weight: 700; }
+.tm-presets label { font-size: 0.85rem; color: var(--muted); display: inline-flex; align-items: center; gap: 4px; }
+.tm-custom { width: 60px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.timer-box.warn { border-color: var(--warn); }
+.timer-box.warn .tm-time { color: var(--warn); }
+.timer-box.over { border-color: var(--danger); background: var(--danger-soft); animation: tmblink 1s steps(2) infinite; }
+.timer-box.over .tm-time { color: var(--danger); }
+@keyframes tmblink { 50% { box-shadow: 0 0 0 6px var(--danger-soft); } }
