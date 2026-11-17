@@ -867,7 +867,8 @@ async function propagateGroup(a, gc) {
   const copies = await db.by('copies', 'assignmentId', a.id);
   for (const sid of g.studentIds) {
     const mc = copies.find(c => c.studentId === sid) || { assignmentId: a.id, studentId: sid };
-    if (mc.override) continue;
+    // note individualisée, ou membre marqué absent / non rendu : il garde sa propre fiche
+    if (mc.override || mc.memberMark) continue;
     // la participation individuelle de l'élève est gardée
     const evaluation = JSON.parse(JSON.stringify(gc.evaluation || {}));
     delete evaluation._part;
@@ -1225,7 +1226,7 @@ async function correctView(assignmentId, studentId) {
       if (!st) continue;
       const mc = copies.find(c => c.studentId === sid);
       const ev = (mc && mc.evaluation) || {};
-      members.push({ id: sid, name: studentName(st), first: st.firstName || studentName(st), part: +ev._part || 0, bonus: [...(ev._bonus || [])], comment: (mc && mc.individualComment) || '', override: !!(mc && mc.override) });
+      members.push({ id: sid, name: studentName(st), first: st.firstName || studentName(st), part: +ev._part || 0, bonus: [...(ev._bonus || [])], comment: (mc && mc.individualComment) || '', override: !!(mc && mc.override), mark: (mc && mc.memberMark) || null });
     }
   }
   const initialSig = sig(copy);
@@ -1247,7 +1248,26 @@ async function correctView(assignmentId, studentId) {
       if (m.bonus.length) mc.evaluation._bonus = [...m.bonus];
       else delete mc.evaluation._bonus;
       mc.individualComment = m.comment || '';
+      const wasMarked = !!mc.memberMark;
+      if (m.mark) {
+        // membre absent ou n'ayant pas rendu : sa fiche ne reçoit pas la note du groupe
+        mc.memberMark = m.mark;
+        mc.evaluation = { _mark: m.mark };
+        mc.status = 'done';
+        mc.correctedAt = Date.now();
+      } else if (wasMarked) {
+        delete mc.memberMark;
+        delete mc.evaluation._mark;
+        mc.status = 'todo';
+      }
       await db.put('copies', mc);
+      // marque retirée : la fiche reprend l'évaluation du groupe
+      if (wasMarked && !m.mark && copy.id) await propagateGroup(a, copy);
+    },
+    // fiche d'un membre du groupe marquée absent / non rendu depuis sa propre page
+    setMemberMark: k => {
+      if (k) copy.memberMark = k;
+      else delete copy.memberMark;
     },
     order: isGroupCopy ? (a.groups || []).map(g => 'g_' + g.id) : students.map(x => x.id),
     exit: () => go('#/devoir/' + assignmentId),

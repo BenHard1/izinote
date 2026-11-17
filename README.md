@@ -33,6 +33,7 @@ Charte graphique : noir `#141414`, orange `#FF7828`, beige `#F5EDE0` · typograp
 - **Importer une grille existante** : depuis un PDF ou une photo (bouton « Photographier »). IziNote lit le texte (aussi sans internet) et propose les critères avec leurs points. Vous les vérifiez avant de valider.
 - **Oraux et travaux de groupe** : à la création d'une évaluation, choisissez le type « Oral » ou « Travail de groupe ».
   - Pour un groupe : créez les groupes, puis évaluez chaque groupe une seule fois. La note et le commentaire sont reportés sur la fiche de chaque membre.
+  - Un membre absent ou qui n'a pas rendu : sur l'écran d'évaluation du groupe, « 🚫 Absent » ou « 📭 Non rendu » sous son nom (en bas). Il ne reçoit pas la note du groupe (absent : hors moyenne ; non rendu : 0). Touchez de nouveau pour annuler : sa fiche reprend la note du groupe.
   - Pour individualiser la note d'un élève, ouvrez sa ligne : il garde alors sa propre note.
   - **Minuteur** : bouton « ⏱ Minuteur » sur la page de l'oral, ou ⏱ en haut de l'écran d'évaluation. Durées rapides (3, 5, 10, 15, 20 min ou autre), pause, ± 1 min. Il passe en orange à la dernière minute, sonne à la fin puis affiche le dépassement. Il reste affiché quand on passe d'un groupe à l'autre.
   - **Écran d'évaluation d'un groupe** : « Questions et notes » et « Commentaire » côte à côte, puis les commentaires individuels de chaque membre à la fin.

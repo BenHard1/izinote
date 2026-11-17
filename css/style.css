@@ -640,3 +640,7 @@ button.file-chip { cursor: pointer; font: inherit; border: none; }
 .timer-box.over { border-color: var(--danger); background: var(--danger-soft); animation: tmblink 1s steps(2) infinite; }
 .timer-box.over .tm-time { color: var(--danger); }
 @keyframes tmblink { 50% { box-shadow: 0 0 0 6px var(--danger-soft); } }
+
+.member-marks { margin: 4px 0 6px; }
+.member-marks .lvl { font-size: 0.8rem; padding: 4px 10px; }
+.member-card.marked { opacity: 0.85; }

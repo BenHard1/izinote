@@ -1052,9 +1052,21 @@ export async function mountEditor(root, ctx) {
         <p class="muted small">Facultatif. Le bonus s'ajoute à la note du groupe, et le commentaire s'ajoute à la suite du commentaire du groupe, dans la fiche et le mail de cet élève seulement.</p>
         ${ctx.members
           .map(
-            m => `<div class="member-card">
-            ${noteGrid ? partRow(m.id, m.name + (m.override ? ' (note individualisée)' : ''), m.part) : `<div class="part-name">${esc(m.name)}</div>`}
-            ${bonusBtns(m.id, m.bonus)}
+            m => `<div class="member-card ${m.mark ? 'marked' : ''}">
+            ${
+              m.mark
+                ? `<div class="part-row"><span class="part-name">${esc(m.name)}</span></div>`
+                : noteGrid
+                ? partRow(m.id, m.name + (m.override ? ' (note individualisée)' : ''), m.part)
+                : `<div class="part-name">${esc(m.name)}</div>`
+            }
+            <div class="levels member-marks">${[
+              ['absent', '🚫 Absent'],
+              ['missing', '📭 Non rendu'],
+            ]
+              .map(([k, label]) => `<button class="lvl mark ${m.mark === k ? 'on' : ''}" data-p="mmark" data-k="${m.id}" data-m="${k}">${label}</button>`)
+              .join('')}</div>
+            ${m.mark ? `<p class="mark-note small">${m.mark === 'absent' ? 'Absent : pas de note, hors moyenne.' : 'Non rendu : note de 0.'} La note du groupe n’est pas reportée sur sa fiche.</p>` : bonusBtns(m.id, m.bonus)}
             <textarea class="input member-comment" data-mc="${m.id}" rows="2" placeholder="Commentaire pour ${esc(m.first)} (facultatif)">${esc(m.comment)}</textarea>
           </div>`
           )
@@ -1190,6 +1202,14 @@ export async function mountEditor(root, ctx) {
     if (!b) return;
     const cid = b.dataset.c;
     switch (b.dataset.p) {
+      case 'mmark': {
+        // membre du groupe absent / non rendu
+        const m = ctx.members.find(x => x.id === b.dataset.k);
+        m.mark = m.mark === b.dataset.m ? null : b.dataset.m;
+        renderPanel();
+        await ctx.updateMember(m);
+        return;
+      }
       case 'part': {
         const d = +b.dataset.d;
         if (b.dataset.k === 'self') {
@@ -1226,10 +1246,12 @@ export async function mountEditor(root, ctx) {
         const k = b.dataset.k;
         if (copy.evaluation._mark === k) {
           delete copy.evaluation._mark;
+          if (ctx.groupMember && ctx.setMemberMark) ctx.setMemberMark(null);
           if (copy.status === 'done' && copy.markedDone) copy.status = 'todo';
           delete copy.markedDone;
         } else {
           copy.evaluation._mark = k;
+          if (ctx.groupMember && ctx.setMemberMark) ctx.setMemberMark(k);
           if (copy.status !== 'done') {
             copy.status = 'done';
             copy.correctedAt = Date.now();
