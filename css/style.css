@@ -680,3 +680,12 @@ button.file-chip { cursor: pointer; font: inherit; border: none; }
 }
 .crow-ccw { min-width: 0; }
 .crow-ccw .fmt-bar { display: none; } /* la vérification automatique reste active */
+
+/* Archives et bibliothèque */
+.ar-sem h2, .lib-class h2 { margin-top: 18px; }
+.lib-folders .chip { border: 1px solid transparent; cursor: pointer; font: inherit; font-size: 0.85rem; font-weight: 700; }
+.lib-folders .chip.on { background: var(--primary-2); color: #141414; }
+button.linkish { background: none; border: none; text-align: left; font: inherit; color: inherit; cursor: pointer; padding: 0; }
+.lib-part { margin: 10px 0 4px; text-transform: uppercase; font-size: 0.9rem; }
+.lib-crits { margin: 0 0 6px; padding-left: 20px; }
+.lib-crits b { color: var(--primary); }

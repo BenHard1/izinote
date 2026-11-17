@@ -1,8 +1,9 @@
 // Stockage local (IndexedDB). Si la synchronisation est activée (sync.js), les données sont aussi
 // copiées dans le Google Drive du Gmail dédié pour être retrouvées sur les autres appareils.
 const DB_NAME = 'correction-db';
-const DB_VERSION = 2;
-export const STORES = ['schools', 'classes', 'students', 'assignments', 'copies', 'grids', 'settings'];
+const DB_VERSION = 3;
+// library : devoirs gardés pour les années suivantes (consignes, documents, grille ; ni notes ni élèves) ; folders : dossiers de rangement
+export const STORES = ['schools', 'classes', 'students', 'assignments', 'copies', 'grids', 'settings', 'library', 'folders'];
 
 let dbPromise = null;
 
@@ -24,6 +25,8 @@ function open() {
       mk('copies', ['assignmentId', 'studentId']);
       mk('grids');
       mk('settings');
+      mk('library');
+      mk('folders');
       // traces des suppressions, pour que la synchronisation les reporte sur les autres appareils
       mk('tombstones');
     };
@@ -191,7 +194,7 @@ export async function exportAll() {
         if (r.pdf instanceof Blob) r.pdf = { __b64: await blobToB64(r.pdf) };
       }
     }
-    if (name === 'assignments') {
+    if (name === 'assignments' || name === 'library') {
       for (const r of rows) for (const d of r.docs || []) if (d.blob instanceof Blob) d.blob = { __b64: await blobToB64(d.blob) };
     }
     out.data[name] = rows;

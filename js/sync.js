@@ -16,7 +16,8 @@ import * as gmail from './gmail.js';
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 const DATA_NAME = 'izinote-donnees.json';
-const SYNC_STORES = ['schools', 'classes', 'students', 'assignments', 'copies', 'grids', 'settings'];
+const SYNC_STORES = ['schools', 'classes', 'students', 'assignments', 'copies', 'grids', 'settings', 'library', 'folders'];
+const WITH_DOCS = name => name === 'assignments' || name === 'library';
 const AUTO_DELAY = 15000;
 const LS_KEY = 'izinote-sync';
 
@@ -228,7 +229,7 @@ async function syncWith(token, localClientId) {
             }
           }
         }
-        if (name === 'assignments' && rec.docs) {
+        if (WITH_DOCS(name) && rec.docs) {
           rec.docs = await Promise.all(
             rec.docs.map(async d => {
               const ld = (l?.docs || []).find(x => x.id === d.id && x.blob instanceof Blob);
@@ -245,7 +246,7 @@ async function syncWith(token, localClientId) {
         const fid = await upload(token, { name: pdfName(id, l.pdfRev), blob: l.pdf });
         byName.set(pdfName(id, l.pdfRev), { id: fid, name: pdfName(id, l.pdfRev) });
       }
-      if (name === 'assignments' && l) {
+      if (WITH_DOCS(name) && l) {
         // documents de travail ajoutés sur cet appareil
         for (const d of l.docs || []) {
           if (!(d.blob instanceof Blob) || byName.has(docName(d.id))) continue;
@@ -255,7 +256,7 @@ async function syncWith(token, localClientId) {
       }
       const pub = { ...win };
       if (name === 'copies') delete pub.pdf;
-      if (name === 'assignments' && pub.docs) pub.docs = pub.docs.map(({ blob, ...d }) => d);
+      if (WITH_DOCS(name) && pub.docs) pub.docs = pub.docs.map(({ blob, ...d }) => d);
       out.push(pub);
     }
     merged[name] = out;
@@ -276,7 +277,7 @@ async function syncWith(token, localClientId) {
   // ménage : PDF qui ne servent plus à aucune copie
   const used = new Set(merged.copies.filter(c => c.pdfRev).map(c => pdfName(c.id, c.pdfRev)));
   for (const f of files) if (f.name.startsWith('pdf_') && !used.has(f.name)) await remove(token, f.id);
-  const usedDocs = new Set(merged.assignments.flatMap(a => (a.docs || []).map(d => docName(d.id))));
+  const usedDocs = new Set([...merged.assignments, ...merged.library].flatMap(a => (a.docs || []).map(d => docName(d.id))));
   for (const f of files) if (f.name.startsWith('doc_') && !usedDocs.has(f.name)) await remove(token, f.id);
 
   // ID client propre à l'appareil (si les réglages viennent d'ailleurs, on garde celui qui marche ici)
