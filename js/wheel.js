@@ -9,7 +9,7 @@ const COLORS = ['#ff7828', '#141414', '#e8b07a', '#a8490d', '#6b5f52', '#ffb27a'
 export async function wheelDialog(a, students, refresh) {
   const isGroup = a.kind === 'groupe';
   const all = isGroup
-    ? (a.groups || []).map(g => ({ id: g.id, name: g.name, sub: g.studentIds.map(id => students.find(s => s.id === id)).filter(Boolean).map(s => s.firstName || studentName(s)).join(', ') }))
+    ? (a.groups || []).map(g => ({ id: g.id, name: g.name + (g.title ? ' · ' + g.title : ''), sub: g.studentIds.map(id => students.find(s => s.id === id)).filter(Boolean).map(s => s.firstName || studentName(s)).join(', ') }))
     : students.map(s => ({ id: s.id, name: studentName(s), sub: '' }));
   if (all.length < 2) return toast(isGroup ? 'Créez au moins 2 groupes pour utiliser la roue.' : 'Il faut au moins 2 élèves.', 'error');
   let order = (a.passOrder || []).filter(id => all.some(x => x.id === id));

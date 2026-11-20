@@ -715,7 +715,7 @@ async function assignmentView(id) {
                   .map(g => {
                     const gc = copyOf('g_' + g.id);
                     const r = gc ? computeResult(grid, gc.evaluation) : null;
-                    return `<div class="list-item"><a class="li-main" href="#/corriger/${id}/g_${g.id}"><b>👥 ${esc(g.name)}</b><small>${g.studentIds.map(sid => students.find(s => s.id === sid)).filter(Boolean).map(studentName).map(esc).join(', ') || 'Aucun membre'}</small></a>
+                    return `<div class="list-item"><a class="li-main" href="#/corriger/${id}/g_${g.id}"><b>👥 ${esc(g.name)}${g.title ? ` · ${esc(g.title)}` : ''}</b><small>${g.studentIds.map(sid => students.find(s => s.id === sid)).filter(Boolean).map(studentName).map(esc).join(', ') || 'Aucun membre'}</small></a>
                     <div class="li-side row">${r && r.short && gc.status === 'done' ? `<span class="score">${esc(r.short)}</span>` : ''}
                       <button class="icon-btn" data-editg="${g.id}" title="Modifier le groupe">✎</button><button class="icon-btn" data-delg="${g.id}" title="Supprimer le groupe">🗑</button>
                       <a class="btn small ${gc && gc.status === 'done' ? '' : 'primary'}" href="#/corriger/${id}/g_${g.id}">${gc && gc.status === 'done' ? 'Revoir' : 'Évaluer'}</a></div></div>`;
@@ -1075,6 +1075,7 @@ async function editGroup(a, students, g) {
   const ok = await modal({
     title: g ? 'Modifier le groupe' : 'Nouveau groupe',
     body: `<label class="field"><span>Nom du groupe</span><input class="input" id="gname" value="${esc(g ? g.name : 'Groupe ' + (others.length + 1))}"></label>
+      <label class="field"><span>Titre <small class="muted">(facultatif, ex. le nom de l’entreprise choisie)</small></span><input class="input" id="gtitle" value="${esc((g && g.title) || '')}" placeholder="Ex. Décathlon"></label>
       <div class="field"><span>Membres</span><div class="send-list">${students
         .map(s => {
           const t = taken(s.id);
@@ -1086,15 +1087,15 @@ async function editGroup(a, students, g) {
       { label: 'Enregistrer', value: true, cls: 'primary' },
     ],
     validate: (x, w) => {
-      v = { name: $('#gname', w).value.trim(), ids: $$('input[type=checkbox]:checked', w).map(i => i.value) };
+      v = { name: $('#gname', w).value.trim(), title: $('#gtitle', w).value.trim(), ids: $$('input[type=checkbox]:checked', w).map(i => i.value) };
       if (!v.name) return toast('Donnez un nom au groupe.', 'error'), false;
       if (!v.ids.length) return toast('Choisissez au moins un membre.', 'error'), false;
       return true;
     },
   });
   if (!ok) return;
-  if (g) Object.assign(g, { name: v.name, studentIds: v.ids });
-  else (a.groups = a.groups || []).push({ id: db.uid(), name: v.name, studentIds: v.ids });
+  if (g) Object.assign(g, { name: v.name, title: v.title, studentIds: v.ids });
+  else (a.groups = a.groups || []).push({ id: db.uid(), name: v.name, title: v.title, studentIds: v.ids });
   await db.put('assignments', a);
   // si le groupe était déjà évalué, on reporte sur les (nouveaux) membres
   const gid = (g || a.groups[a.groups.length - 1]).id;
@@ -1448,10 +1449,12 @@ async function correctView(assignmentId, studentId) {
   if (!a) return go('#/');
   const isGroupCopy = studentId.startsWith('g_');
   const group = isGroupCopy ? (a.groups || []).find(g => 'g_' + g.id === studentId) : null;
-  const s = isGroupCopy ? group && { id: studentId, firstName: '👥 ' + group.name, lastName: '', isGroup: true } : await db.get('students', studentId);
+  const s = isGroupCopy ? group && { id: studentId, firstName: '👥 ' + group.name + (group.title ? ' · ' + group.title : ''), lastName: '', isGroup: true } : await db.get('students', studentId);
   if (!s) return go('#/devoir/' + assignmentId);
   const cls = await db.get('classes', a.classId);
   const students = (await db.by('students', 'classId', a.classId)).sort(db.sortStudents);
+  // copie de groupe : noms des membres affichés en haut de la page
+  if (isGroupCopy) s.memberNames = group.studentIds.map(sid => students.find(x => x.id === sid)).filter(Boolean).map(studentName);
   const copy = await getOrCreateCopy(assignmentId, studentId);
   const settings = await db.getSettings();
   document.body.classList.add('fullscreen');

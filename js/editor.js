@@ -65,7 +65,7 @@ export async function mountEditor(root, ctx) {
   <div class="editor ${st.panelOpen || !(copy.pdf instanceof Blob) ? 'panel-open' : ''} ${copy.pdf instanceof Blob ? '' : 'no-doc'}">
     <div class="ed-top">
       <button class="icon-btn" data-act="back" title="Retour au devoir">←</button>
-      <div class="ed-title"><b>${esc(studentName(student))}</b><small>${esc(assignment.title)} · ${idx + 1}/${ctx.order.length}</small></div>
+      <div class="ed-title"><b>${esc(studentName(student))}</b>${(student.memberNames || []).length ? `<small class="ed-members" title="${esc(student.memberNames.join(', '))}">${esc(student.memberNames.join(', '))}</small>` : ''}<small>${esc(assignment.title)} · ${idx + 1}/${ctx.order.length}</small></div>
       <button class="icon-btn" data-act="prev" ${prevId ? '' : 'disabled'} title="Étudiant précédent">‹</button>
       <button class="icon-btn" data-act="next" ${nextId ? '' : 'disabled'} title="Étudiant suivant">›</button>
       ${(ctx.kind === 'oral' || ctx.kind === 'groupe') ? '<button class="icon-btn" data-act="timer" title="Chronomètre">⏱</button>' : ''}

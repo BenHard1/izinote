@@ -332,6 +332,7 @@ input, textarea, select, button { font-family: var(--font); }
 .ed-top .icon-btn { color: var(--beige); }
 .ed-top .icon-btn:hover { background: #2a2a2a; }
 .ed-title small { color: #c9bca8; }
+.ed-title small.ed-members { color: var(--beige); font-weight: 600; }
 .ed-top .ed-logo { height: 26px; width: auto; margin: 0 4px; }
 .mic { background: var(--brand); }
 .progress span { background: var(--brand); }
