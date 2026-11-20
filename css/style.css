@@ -19,6 +19,8 @@
   --warn-soft: #fbecc8;
   --danger: #c0262d;
   --danger-soft: #fbe1df;
+  --doing: #1f5fa8;
+  --doing-soft: #dce9f8;
   --radius: 14px;
   --shadow: 0 1px 2px rgba(40, 25, 10, 0.06), 0 4px 14px rgba(40, 25, 10, 0.07);
   --tap: 44px;
@@ -42,6 +44,8 @@
     --warn-soft: #3b2c12;
     --danger: #ff7a7f;
     --danger-soft: #3d1c1f;
+    --doing: #7fb4ee;
+    --doing-soft: #182a40;
     color-scheme: dark;
   }
 }
@@ -61,6 +65,8 @@
   --warn-soft: #3b2c12;
   --danger: #ff7a7f;
   --danger-soft: #3d1c1f;
+  --doing: #7fb4ee;
+  --doing-soft: #182a40;
   color-scheme: dark;
 }
 
@@ -160,6 +166,8 @@ a.list-item:hover, .li-main:hover b { color: var(--primary); }
 .tag { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 0.78rem; font-weight: 600; background: var(--surface-2); color: var(--muted); }
 .tag.todo { background: var(--warn-soft); color: var(--warn); }
 .tag.done { background: var(--success-soft); color: var(--success); }
+.tag.doing { background: var(--doing-soft); color: var(--doing); }
+.list-item.doing { box-shadow: inset 4px 0 0 var(--doing); background: color-mix(in srgb, var(--doing-soft) 45%, transparent); }
 .tag.sent { background: var(--primary-soft); color: var(--primary); }
 .score { display: inline-block; padding: 3px 10px; border-radius: 8px; background: var(--primary-soft); color: var(--primary); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .score.partial { background: var(--surface-2); color: var(--muted); }

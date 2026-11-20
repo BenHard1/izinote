@@ -625,8 +625,19 @@ async function studentView(id, semParam) {
   };
 }
 
+// copie commencée (annotations, critères ou commentaire) mais pas encore terminée
+function inProgress(c) {
+  if (!c || c.status === 'done') return false;
+  const ev = c.evaluation || {};
+  if (ev._mark) return false;
+  const hasEval = Object.keys(ev).some(k => !k.startsWith('_'));
+  const hasNotes = Object.values(c.annotations || {}).some(l => Array.isArray(l) && l.length);
+  return !!(hasEval || hasNotes || (c.comment && toPlain(c.comment).trim()));
+}
+
 function statusLabel(c, a) {
   const noCopy = a && noCopyKind(a.kind);
+  if (inProgress(c)) return '<span class="tag doing">✎ En cours de correction</span>';
   if (!c || (!c.pdf && c.status !== 'done')) return noCopy ? '<span class="tag todo">À évaluer</span>' : '<span class="tag">Pas de copie</span>';
   const mk = c.evaluation && c.evaluation._mark;
   if (mk === 'absent') return '<span class="tag">🚫 Absent</span>';
@@ -658,12 +669,12 @@ async function assignmentView(id) {
     const c = copyOf(s.id);
     const r = c ? computeResult(grid, c.evaluation) : null;
     const g = groupOf(s.id);
-    return `<div class="list-item">
+    return `<div class="list-item${inProgress(c) ? ' doing' : ''}">
       <a class="li-main" href="#/corriger/${id}/${s.id}"><b>${esc(studentName(s))}</b><small>${statusLabel(c, a)}${g ? ' · 👥 ' + esc(g.name) + (c && c.override ? ' (note individualisée)' : '') : ''}${c && c.fileName ? ' · ' + esc(c.fileName) : ''}</small></a>
       <div class="li-side row">
         ${r && r.short && (c.status === 'done' || Object.keys(c.evaluation || {}).length) ? `<span class="score ${c.status === 'done' ? '' : 'partial'}">${esc(r.short)}</span>` : ''}
         ${isOral || isGroup ? '' : `<button class="icon-btn" data-up="${s.id}" title="${c && c.pdf ? 'Remplacer le PDF' : 'Importer le PDF'}">📎</button>`}
-        <a class="btn small ${c && c.status === 'done' ? '' : (c && c.pdf) || isOral || isExam ? 'primary' : ''}" href="#/corriger/${id}/${s.id}">${c && c.status === 'done' ? 'Revoir' : isExam ? 'Noter' : isOral || isGroup ? 'Évaluer' : 'Corriger'}</a>
+        <a class="btn small ${c && c.status === 'done' ? '' : (c && c.pdf) || isOral || isExam ? 'primary' : ''}" href="#/corriger/${id}/${s.id}">${c && c.status === 'done' ? 'Revoir' : inProgress(c) ? 'Reprendre' : isExam ? 'Noter' : isOral || isGroup ? 'Évaluer' : 'Corriger'}</a>
       </div></div>`;
   };
 
